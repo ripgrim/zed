@@ -32,14 +32,14 @@ const COMMAND_OUTPUT_LIMIT: u64 = 16 * 1024;
 /// Remember that each invocation of this tool will spawn a new shell process, so you can't rely on any state from previous invocations.
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
 pub struct TerminalToolInput {
-    /// The one-liner command to execute.
-    pub command: String,
-    /// Working directory for the command. This must be one of the root directories of the project.
-    pub cd: String,
+    /// Either the command to run, or, if there's already a running process, the input
+    /// to send to that running process.
+    pub action: TerminalAction,
     /// Optional maximum runtime (in milliseconds). If exceeded, the running terminal task is killed.
     pub timeout_ms: Option<u64>,
 }
 
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
 pub enum TerminalAction {
     /// Executes a command in a terminal.
     /// For example, "git status" would run `git status`.
@@ -94,7 +94,11 @@ impl AgentTool for TerminalTool {
         _cx: &mut App,
     ) -> SharedString {
         if let Ok(input) = input {
-            let mut lines = input.command.lines();
+            let text = match &input.action {
+                TerminalAction::RunCmd { command, .. } => command.as_str(),
+                TerminalAction::SendInput { input } => input.as_str(),
+            };
+            let mut lines = text.lines();
             let first_line = lines.next().unwrap_or_default();
             let remaining_line_count = lines.count();
             match remaining_line_count {
@@ -120,9 +124,19 @@ impl AgentTool for TerminalTool {
         event_stream: ToolCallEventStream,
         cx: &mut App,
     ) -> Task<Result<Self::Output>> {
-        let working_dir = match working_dir(&input, &self.project, cx) {
-            Ok(dir) => dir,
-            Err(err) => return Task::ready(Err(err)),
+        let (command, working_dir) = match &input.action {
+            TerminalAction::RunCmd { command, cd } => {
+                let working_dir = match working_dir_from_cd(cd, &self.project, cx) {
+                    Ok(dir) => dir,
+                    Err(err) => return Task::ready(Err(err)),
+                };
+                (command.clone(), working_dir)
+            }
+            TerminalAction::SendInput { .. } => {
+                return Task::ready(Err(anyhow::anyhow!(
+                    "SendInput action is not yet supported"
+                )));
+            }
         };
 
         let authorize = event_stream.authorize(self.initial_title(Ok(input.clone()), cx), cx);
@@ -131,12 +145,7 @@ impl AgentTool for TerminalTool {
 
             let terminal = self
                 .environment
-                .create_terminal(
-                    input.command.clone(),
-                    working_dir,
-                    Some(COMMAND_OUTPUT_LIMIT),
-                    cx,
-                )
+                .create_terminal(command.clone(), working_dir, Some(COMMAND_OUTPUT_LIMIT), cx)
                 .await?;
 
             let terminal_id = terminal.id(cx)?;
@@ -166,7 +175,7 @@ impl AgentTool for TerminalTool {
 
             let output = terminal.current_output(cx)?;
 
-            Ok(process_content(output, &input.command, exit_status))
+            Ok(process_content(output, &command, exit_status))
         })
     }
 }
@@ -217,13 +226,12 @@ fn process_content(
     content
 }
 
-fn working_dir(
-    input: &TerminalToolInput,
+fn working_dir_from_cd(
+    cd: &str,
     project: &Entity<Project>,
     cx: &mut App,
 ) -> Result<Option<PathBuf>> {
     let project = project.read(cx);
-    let cd = &input.cd;
 
     if cd == "." || cd.is_empty() {
         // Accept "." or "" as meaning "the one worktree" if we only have one worktree.
