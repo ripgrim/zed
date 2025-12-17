@@ -1433,6 +1433,14 @@ pub struct AcpThreadEnvironment {
     acp_thread: WeakEntity<AcpThread>,
 }
 
+impl AcpThreadEnvironment {
+    pub fn new(acp_thread: Entity<AcpThread>) -> Self {
+        Self {
+            acp_thread: acp_thread.downgrade(),
+        }
+    }
+}
+
 impl ThreadEnvironment for AcpThreadEnvironment {
     fn create_terminal(
         &self,
@@ -1471,6 +1479,20 @@ impl ThreadEnvironment for AcpThreadEnvironment {
 pub struct AcpTerminalHandle {
     terminal: Entity<acp_thread::Terminal>,
     _drop_tx: Option<oneshot::Sender<()>>,
+}
+
+impl AcpTerminalHandle {
+    /// Creates a new AcpTerminalHandle wrapping the given terminal.
+    /// The drop_tx is used to signal when the handle is dropped so the terminal can be released.
+    pub fn new(
+        terminal: Entity<acp_thread::Terminal>,
+        drop_tx: Option<oneshot::Sender<()>>,
+    ) -> Self {
+        Self {
+            terminal,
+            _drop_tx: drop_tx,
+        }
+    }
 }
 
 impl TerminalHandle for AcpTerminalHandle {

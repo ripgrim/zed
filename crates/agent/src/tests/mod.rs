@@ -1,5 +1,7 @@
 use super::*;
-use acp_thread::{AgentConnection, AgentModelGroupName, AgentModelList, UserMessageId};
+use acp_thread::{
+    AgentConnection, AgentModelGroupName, AgentModelList, StubAgentConnection, UserMessageId,
+};
 use agent_client_protocol::{self as acp};
 use agent_settings::AgentProfileId;
 use anyhow::Result;
@@ -7,7 +9,7 @@ use client::{Client, UserStore};
 use cloud_llm_client::CompletionIntent;
 use collections::IndexMap;
 use context_server::{ContextServer, ContextServerCommand, ContextServerId};
-use fs::{FakeFs, Fs};
+use fs::{FakeFs, Fs, RealFs};
 use futures::{
     FutureExt as _, StreamExt,
     channel::{
@@ -54,8 +56,7 @@ use test_tools::*;
 
 fn init_test(cx: &mut TestAppContext) {
     cx.update(|cx| {
-        let settings_store = SettingsStore::test(cx);
-        cx.set_global(settings_store);
+        settings::init(cx);
     });
 }
 
@@ -190,8 +191,10 @@ async fn test_terminal_tool_timeout_kills_handle(cx: &mut TestAppContext) {
     let task = cx.update(|cx| {
         tool.run(
             crate::TerminalToolInput {
-                command: "sleep 1000".to_string(),
-                cd: ".".to_string(),
+                action: crate::TerminalAction::RunCmd {
+                    command: "sleep 1000".to_string(),
+                    cd: ".".to_string(),
+                },
                 timeout_ms: Some(5),
             },
             event_stream,
@@ -257,8 +260,10 @@ async fn test_terminal_tool_without_timeout_does_not_kill_handle(cx: &mut TestAp
     let _task = cx.update(|cx| {
         tool.run(
             crate::TerminalToolInput {
-                command: "sleep 1000".to_string(),
-                cd: ".".to_string(),
+                action: crate::TerminalAction::RunCmd {
+                    command: "sleep 1000".to_string(),
+                    cd: ".".to_string(),
+                },
                 timeout_ms: None,
             },
             event_stream,
@@ -281,6 +286,115 @@ async fn test_terminal_tool_without_timeout_does_not_kill_handle(cx: &mut TestAp
     assert!(
         !handle.was_killed(),
         "did not expect terminal handle to be killed without a timeout"
+    );
+}
+
+/// Test that simulates a conversation where the model calls the terminal tool
+/// to run `less README.md`, which blocks waiting for user input.
+/// The test verifies that the timeout is hit and the process is killed.
+#[gpui::test]
+async fn test_terminal_tool_less_command_times_out(cx: &mut TestAppContext) {
+    cx.executor().allow_parking();
+    init_test(cx);
+    always_allow_tools(cx);
+
+    // Find the zed repo root by looking for README.md relative to the crate
+    let zed_repo_root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .unwrap()
+        .parent()
+        .unwrap()
+        .to_path_buf();
+
+    assert!(
+        zed_repo_root.join("README.md").exists(),
+        "Could not find README.md at {:?}",
+        zed_repo_root
+    );
+
+    // Create a project with RealFs pointing to the zed repo root
+    let real_fs = Arc::new(RealFs::new(None, cx.executor()));
+    let project = Project::test(real_fs, [zed_repo_root.as_path()], cx).await;
+
+    // Get the worktree name (should be "zed" or similar)
+    let worktree_name = project.read_with(cx, |project, cx| {
+        project
+            .worktrees(cx)
+            .next()
+            .map(|wt| wt.read(cx).root_name_str().to_owned())
+            .unwrap_or_default()
+    });
+
+    // Create an AcpThread using the stub connection (production path for terminal creation)
+    let connection = Rc::new(StubAgentConnection::new());
+    let acp_thread = cx
+        .update(|cx| {
+            connection
+                .clone()
+                .new_thread(project.clone(), zed_repo_root.as_path(), cx)
+        })
+        .await
+        .unwrap();
+
+    // Use the production AcpThreadEnvironment
+    // Note: We must keep acp_thread alive since AcpThreadEnvironment only holds a WeakEntity
+    let environment = Rc::new(crate::AcpThreadEnvironment::new(acp_thread.clone()));
+    let _acp_thread = acp_thread; // Keep the strong reference alive
+
+    #[allow(clippy::arc_with_non_send_sync)]
+    let tool = Arc::new(crate::TerminalTool::new(project, environment));
+    let (event_stream, _rx) = crate::ToolCallEventStream::test();
+
+    // Simulate user message: "Please run `less README.md`"
+    // Model responds with terminal tool call
+    let timeout_ms = 2000; // 2 second timeout
+
+    let task = cx.update(|cx| {
+        tool.run(
+            crate::TerminalToolInput {
+                action: crate::TerminalAction::RunCmd {
+                    command: "less README.md".to_string(),
+                    cd: worktree_name,
+                },
+                timeout_ms: Some(timeout_ms),
+            },
+            event_stream,
+            cx,
+        )
+    });
+
+    // Wait for the task to complete - it should hit the timeout and return
+    // We use a test-level timeout that's longer than the tool timeout to catch hangs
+    let test_timeout = Duration::from_millis(timeout_ms + 3000);
+    let start = std::time::Instant::now();
+
+    let mut task_pinned = std::pin::pin!(task.fuse());
+
+    let result = loop {
+        // Check if task is ready
+        futures::select_biased! {
+            result = task_pinned.as_mut() => break result,
+            _ = cx.background_executor.timer(Duration::from_millis(100)).fuse() => {
+                cx.run_until_parked();
+            }
+        }
+
+        if start.elapsed() > test_timeout {
+            panic!(
+                "Test timed out after {:?} waiting for terminal tool - `less` should have been killed by the {} ms timeout",
+                start.elapsed(),
+                timeout_ms
+            );
+        }
+    };
+
+    let result = result.expect("terminal tool task should complete without error");
+    // The result should indicate the command failed because `less` doesn't exit on its own -
+    // it waits for user input and gets killed by the timeout. The production code path
+    // (via portable_pty) reports this as "failed with exit code" rather than "interrupted".
+    assert!(
+        result.contains("failed"),
+        "expected result to indicate command failed, got: {result}"
     );
 }
 
