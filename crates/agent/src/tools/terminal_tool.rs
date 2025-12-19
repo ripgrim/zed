@@ -2,6 +2,7 @@ use agent_client_protocol as acp;
 use anyhow::Result;
 use futures::FutureExt as _;
 use gpui::{App, AppContext, Entity, SharedString, Task};
+use language_model::LanguageModelToolSchemaFormat;
 use project::Project;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -17,25 +18,26 @@ use crate::{AgentTool, ThreadEnvironment, ToolCallEventStream};
 
 const COMMAND_OUTPUT_LIMIT: u64 = 16 * 1024;
 
-/// Executes a shell one-liner and returns the combined output.
+/// Executes a shell command or interacts with a running terminal process.
 ///
-/// This tool spawns a process using the user's shell, reads from stdout and stderr (preserving the order of writes), and returns a string with the combined output result.
+/// This tool can:
+/// 1. Run a new command in a terminal (RunCmd)
+/// 2. Send input to an already-running process (SendInput)
+/// 3. Wait for a running process and check its status (Wait)
 ///
-/// The output results will be shown to the user already, only list it again if necessary, avoid being redundant.
+/// When a command times out or you use Wait, the process is NOT killed. Instead, you get
+/// the current terminal output and can decide what to do next:
+/// - Send input to interact with the process (e.g., "q" to quit less, Ctrl+C to interrupt)
+/// - Use Wait to check on it again later
+/// - Make a different tool call or respond with text (this will automatically kill the terminal)
 ///
-/// Make sure you use the `cd` parameter to navigate to one of the root directories of the project. NEVER do it as part of the `command` itself, otherwise it will error.
-///
-/// Do not use this tool for commands that run indefinitely, such as servers (like `npm run start`, `npm run dev`, `python -m http.server`, etc) or file watchers that don't terminate on their own.
-///
-/// For potentially long-running commands, prefer specifying `timeout_ms` to bound runtime and prevent indefinite hangs.
-///
-/// Remember that each invocation of this tool will spawn a new shell process, so you can't rely on any state from previous invocations.
+/// Make sure you use the `cd` parameter to navigate to one of the root directories of the project.
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
 pub struct TerminalToolInput {
-    /// Either the command to run, or, if there's already a running process, the input
-    /// to send to that running process.
+    /// The action to perform: run a command, send input to a running process, or wait on a process.
     pub action: TerminalAction,
-    /// Optional maximum runtime (in milliseconds). If exceeded, the running terminal task is killed.
+    /// Optional timeout in milliseconds. If the process hasn't exited by then, the tool returns
+    /// with the current terminal state. The process is NOT killed - you can send more input or wait again.
     pub timeout_ms: Option<u64>,
 }
 
@@ -43,6 +45,9 @@ pub struct TerminalToolInput {
 pub enum TerminalAction {
     /// Executes a command in a terminal.
     /// For example, "git status" would run `git status`.
+    /// Returns a terminal_id that can be used with SendInput or Wait.
+    /// If the command doesn't exit within timeout_ms, returns the current output
+    /// and the process keeps running - use SendInput to interact or Wait to check again.
     RunCmd {
         /// The one-liner command to execute.
         command: String,
@@ -50,18 +55,19 @@ pub enum TerminalAction {
         cd: String,
     },
     /// Sends input to an already-running process.
-    /// This can *ONLY* be used when there is already a
-    /// terminal running. If this is specified and there
-    /// is no terminal running, the tool call
-    /// will error.
+    /// Use this to interact with interactive programs (e.g., send "q" to quit less).
+    /// A newline is automatically appended to the input.
     SendInput {
-        /// The ID of the terminal to send input to.
-        /// This must be a terminal that was previously created by a RunCmd action.
+        /// The ID of the terminal to send input to (from a previous RunCmd).
         terminal_id: String,
-        /// The input string to send to the process.
-        /// Note: a newline will be sent at the end of this
-        /// automatically, even if it doesn't end in a newline.
+        /// The input string to send. A newline will be appended automatically.
         input: String,
+    },
+    /// Waits for a running process and returns its current state.
+    /// Use this to check on a long-running process without sending input.
+    Wait {
+        /// The ID of the terminal to wait on (from a previous RunCmd).
+        terminal_id: String,
     },
 }
 
@@ -91,6 +97,16 @@ impl AgentTool for TerminalTool {
         acp::ToolKind::Execute
     }
 
+    fn input_schema(format: LanguageModelToolSchemaFormat) -> schemars::Schema {
+        let schema = schemars::schema_for!(TerminalToolInput);
+        eprintln!(
+            "[INTERACTIVE-TERMINAL-DEBUG] Terminal tool schema (format {:?}):\n{}",
+            format,
+            serde_json::to_string_pretty(&schema).unwrap_or_else(|e| format!("Error: {}", e))
+        );
+        schema
+    }
+
     fn initial_title(
         &self,
         input: Result<Self::Input, serde_json::Value>,
@@ -100,6 +116,7 @@ impl AgentTool for TerminalTool {
             let text = match &input.action {
                 TerminalAction::RunCmd { command, .. } => command.as_str(),
                 TerminalAction::SendInput { input, .. } => input.as_str(),
+                TerminalAction::Wait { terminal_id } => terminal_id.as_str(),
             };
             let mut lines = text.lines();
             let first_line = lines.next().unwrap_or_default();
@@ -129,6 +146,11 @@ impl AgentTool for TerminalTool {
     ) -> Task<Result<Self::Output>> {
         let timeout = input.timeout_ms.map(Duration::from_millis);
 
+        eprintln!(
+            "[INTERACTIVE-TERMINAL-DEBUG] Terminal tool run() called with action: {:?}, timeout: {:?}",
+            input.action, timeout
+        );
+
         match &input.action {
             TerminalAction::RunCmd { command, cd } => {
                 let working_dir = match working_dir_from_cd(cd, &self.project, cx) {
@@ -142,6 +164,11 @@ impl AgentTool for TerminalTool {
                 cx.spawn(async move |cx| {
                     authorize.await?;
 
+                    eprintln!(
+                        "[INTERACTIVE-TERMINAL-DEBUG] RunCmd authorized, creating terminal for command: {}",
+                        command
+                    );
+
                     let terminal = self
                         .environment
                         .create_terminal(
@@ -153,11 +180,15 @@ impl AgentTool for TerminalTool {
                         .await?;
 
                     let terminal_id = terminal.id(cx)?;
+                    eprintln!(
+                        "[INTERACTIVE-TERMINAL-DEBUG] Terminal created with ID: {:?}",
+                        terminal_id
+                    );
                     event_stream.update_fields(acp::ToolCallUpdateFields::new().content(vec![
-                        acp::ToolCallContent::Terminal(acp::Terminal::new(terminal_id)),
+                        acp::ToolCallContent::Terminal(acp::Terminal::new(terminal_id.clone())),
                     ]));
 
-                    let exit_status = match timeout {
+                    let (exited, exit_status) = match timeout {
                         Some(timeout) => {
                             let wait_for_exit = terminal.wait_for_exit(cx)?;
                             let timeout_task = cx.background_spawn(async move {
@@ -165,19 +196,39 @@ impl AgentTool for TerminalTool {
                             });
 
                             futures::select! {
-                                status = wait_for_exit.clone().fuse() => status,
+                                status = wait_for_exit.clone().fuse() => {
+                                    eprintln!(
+                                        "[INTERACTIVE-TERMINAL-DEBUG] RunCmd: process exited with status: {:?}",
+                                        status
+                                    );
+                                    (true, status)
+                                },
                                 _ = timeout_task.fuse() => {
-                                    terminal.kill(cx)?;
-                                    wait_for_exit.await
+                                    eprintln!(
+                                        "[INTERACTIVE-TERMINAL-DEBUG] RunCmd: timeout reached ({:?}), process still running",
+                                        timeout
+                                    );
+                                    (false, acp::TerminalExitStatus::new())
                                 }
                             }
                         }
-                        None => terminal.wait_for_exit(cx)?.await,
+                        None => {
+                            let status = terminal.wait_for_exit(cx)?.await;
+                            (true, status)
+                        }
                     };
 
                     let output = terminal.current_output(cx)?;
+                    let terminal_id_str = terminal_id.0.to_string();
 
-                    Ok(process_content(output, &command, exit_status))
+                    Ok(process_run_cmd_result(
+                        output,
+                        &command,
+                        &terminal_id_str,
+                        exited,
+                        exit_status,
+                        timeout,
+                    ))
                 })
             }
             TerminalAction::SendInput { terminal_id, input } => {
@@ -193,9 +244,19 @@ impl AgentTool for TerminalTool {
                 cx.spawn(async move |cx| {
                     authorize.await?;
 
+                    eprintln!(
+                        "[INTERACTIVE-TERMINAL-DEBUG] SendInput authorized, looking up terminal: {:?}",
+                        terminal_id
+                    );
+
                     let terminal = self.environment.get_terminal(&terminal_id, cx)?;
 
+                    eprintln!(
+                        "[INTERACTIVE-TERMINAL-DEBUG] Sending input to terminal: {:?}",
+                        input
+                    );
                     terminal.send_input(&input, cx)?;
+                    eprintln!("[INTERACTIVE-TERMINAL-DEBUG] Input sent successfully");
 
                     let timeout = timeout.unwrap_or(Duration::from_millis(1000));
                     let (exited, exit_status) = {
@@ -205,14 +266,30 @@ impl AgentTool for TerminalTool {
                         });
 
                         futures::select! {
-                            status = wait_for_exit.clone().fuse() => (true, status),
+                            status = wait_for_exit.clone().fuse() => {
+                                eprintln!(
+                                    "[INTERACTIVE-TERMINAL-DEBUG] Terminal exited with status: {:?}",
+                                    status
+                                );
+                                (true, status)
+                            },
                             _ = timeout_task.fuse() => {
+                                eprintln!(
+                                    "[INTERACTIVE-TERMINAL-DEBUG] Timeout reached ({:?}), terminal still running",
+                                    timeout
+                                );
                                 (false, acp::TerminalExitStatus::new())
                             }
                         }
                     };
 
                     let output = terminal.current_output(cx)?;
+                    eprintln!(
+                        "[INTERACTIVE-TERMINAL-DEBUG] Current output length: {}, truncated: {}, exited: {}",
+                        output.output.len(),
+                        output.truncated,
+                        exited
+                    );
                     Ok(process_send_input_result(
                         output,
                         &input,
@@ -222,6 +299,201 @@ impl AgentTool for TerminalTool {
                     ))
                 })
             }
+            TerminalAction::Wait { terminal_id } => {
+                let terminal_id = acp::TerminalId::new(terminal_id.clone());
+
+                let title: SharedString = MarkdownInlineCode(&format!("wait: {}", terminal_id.0))
+                    .to_string()
+                    .into();
+                let authorize = event_stream.authorize(title, cx);
+
+                cx.spawn(async move |cx| {
+                    authorize.await?;
+
+                    eprintln!(
+                        "[INTERACTIVE-TERMINAL-DEBUG] Wait: looking up terminal: {:?}",
+                        terminal_id
+                    );
+
+                    let terminal = self.environment.get_terminal(&terminal_id, cx)?;
+
+                    let timeout = timeout.unwrap_or(Duration::from_millis(5000));
+                    let (exited, exit_status) = {
+                        let wait_for_exit = terminal.wait_for_exit(cx)?;
+                        let timeout_task = cx.background_spawn(async move {
+                            smol::Timer::after(timeout).await;
+                        });
+
+                        futures::select! {
+                            status = wait_for_exit.clone().fuse() => {
+                                eprintln!(
+                                    "[INTERACTIVE-TERMINAL-DEBUG] Wait: process exited with status: {:?}",
+                                    status
+                                );
+                                (true, status)
+                            },
+                            _ = timeout_task.fuse() => {
+                                eprintln!(
+                                    "[INTERACTIVE-TERMINAL-DEBUG] Wait: timeout reached ({:?}), process still running",
+                                    timeout
+                                );
+                                (false, acp::TerminalExitStatus::new())
+                            }
+                        }
+                    };
+
+                    let output = terminal.current_output(cx)?;
+                    let terminal_id_str = terminal_id.0.to_string();
+
+                    Ok(process_wait_result(
+                        output,
+                        &terminal_id_str,
+                        exited,
+                        exit_status,
+                        timeout,
+                    ))
+                })
+            }
+        }
+    }
+}
+
+fn process_run_cmd_result(
+    output: acp::TerminalOutputResponse,
+    command: &str,
+    terminal_id: &str,
+    exited: bool,
+    exit_status: acp::TerminalExitStatus,
+    timeout: Option<Duration>,
+) -> String {
+    let content = output.output.trim();
+    let content_block = if content.is_empty() {
+        String::new()
+    } else if output.truncated {
+        format!(
+            "Output truncated. The first {} bytes:\n\n```\n{}\n```",
+            content.len(),
+            content
+        )
+    } else {
+        format!("```\n{}\n```", content)
+    };
+
+    if exited {
+        match exit_status.exit_code {
+            Some(0) => {
+                if content_block.is_empty() {
+                    "Command executed successfully.".to_string()
+                } else {
+                    content_block
+                }
+            }
+            Some(code) => {
+                if content_block.is_empty() {
+                    format!("Command \"{}\" failed with exit code {}.", command, code)
+                } else {
+                    format!(
+                        "Command \"{}\" failed with exit code {}.\n\n{}",
+                        command, code, content_block
+                    )
+                }
+            }
+            None => {
+                if content_block.is_empty() {
+                    format!("Command \"{}\" was interrupted.", command)
+                } else {
+                    format!(
+                        "Command \"{}\" was interrupted.\n\n{}",
+                        command, content_block
+                    )
+                }
+            }
+        }
+    } else {
+        let timeout_ms = timeout.map(|t| t.as_millis()).unwrap_or(0);
+        let still_running_msg = format!(
+            "The command is still running after {} ms. Terminal ID: {}\n\n\
+            You can:\n\
+            - Use SendInput with terminal_id \"{}\" to send input (e.g., \"q\" to quit, or Ctrl+C as \"\\x03\")\n\
+            - Use Wait with terminal_id \"{}\" to check on it again\n\
+            - Make a different tool call or respond with text (this will kill the process)",
+            timeout_ms, terminal_id, terminal_id, terminal_id
+        );
+        if content_block.is_empty() {
+            still_running_msg
+        } else {
+            format!(
+                "{}\n\nCurrent terminal output:\n\n{}",
+                still_running_msg, content_block
+            )
+        }
+    }
+}
+
+fn process_wait_result(
+    output: acp::TerminalOutputResponse,
+    terminal_id: &str,
+    exited: bool,
+    exit_status: acp::TerminalExitStatus,
+    timeout: Duration,
+) -> String {
+    let content = output.output.trim();
+    let content_block = if content.is_empty() {
+        String::new()
+    } else if output.truncated {
+        format!(
+            "Output truncated. The first {} bytes:\n\n```\n{}\n```",
+            content.len(),
+            content
+        )
+    } else {
+        format!("```\n{}\n```", content)
+    };
+
+    if exited {
+        match exit_status.exit_code {
+            Some(0) => {
+                if content_block.is_empty() {
+                    "The process exited successfully.".to_string()
+                } else {
+                    format!("The process exited successfully.\n\n{}", content_block)
+                }
+            }
+            Some(code) => {
+                if content_block.is_empty() {
+                    format!("The process exited with code {}.", code)
+                } else {
+                    format!(
+                        "The process exited with code {}.\n\n{}",
+                        code, content_block
+                    )
+                }
+            }
+            None => {
+                if content_block.is_empty() {
+                    "The process was interrupted.".to_string()
+                } else {
+                    format!("The process was interrupted.\n\n{}", content_block)
+                }
+            }
+        }
+    } else {
+        let timeout_ms = timeout.as_millis();
+        let still_running_msg = format!(
+            "The process is still running after {} ms.\n\n\
+            You can:\n\
+            - Use SendInput with terminal_id \"{}\" to send input (e.g., \"q\" to quit, or Ctrl+C as \"\\x03\")\n\
+            - Use Wait with terminal_id \"{}\" to check on it again\n\
+            - Make a different tool call or respond with text (this will kill the process)",
+            timeout_ms, terminal_id, terminal_id
+        );
+        if content_block.is_empty() {
+            still_running_msg
+        } else {
+            format!(
+                "{}\n\nCurrent terminal output:\n\n{}",
+                still_running_msg, content_block
+            )
         }
     }
 }
@@ -299,52 +571,6 @@ fn process_send_input_result(
             )
         }
     }
-}
-
-fn process_content(
-    output: acp::TerminalOutputResponse,
-    command: &str,
-    exit_status: acp::TerminalExitStatus,
-) -> String {
-    let content = output.output.trim();
-    let is_empty = content.is_empty();
-
-    let content = format!("```\n{content}\n```");
-    let content = if output.truncated {
-        format!(
-            "Command output too long. The first {} bytes:\n\n{content}",
-            content.len(),
-        )
-    } else {
-        content
-    };
-
-    let content = match exit_status.exit_code {
-        Some(0) => {
-            if is_empty {
-                "Command executed successfully.".to_string()
-            } else {
-                content
-            }
-        }
-        Some(exit_code) => {
-            if is_empty {
-                format!("Command \"{command}\" failed with exit code {}.", exit_code)
-            } else {
-                format!(
-                    "Command \"{command}\" failed with exit code {}.\n\n{content}",
-                    exit_code
-                )
-            }
-        }
-        None => {
-            format!(
-                "Command failed or was interrupted.\nPartial output captured:\n\n{}",
-                content,
-            )
-        }
-    };
-    content
 }
 
 fn working_dir_from_cd(

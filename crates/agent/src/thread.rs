@@ -1593,6 +1593,16 @@ impl Thread {
     ) -> Option<Task<LanguageModelToolResult>> {
         cx.notify();
 
+        eprintln!(
+            "[INTERACTIVE-TERMINAL-DEBUG] handle_tool_use_event: tool='{}', id='{}', is_input_complete={}",
+            tool_use.name, tool_use.id, tool_use.is_input_complete
+        );
+        eprintln!(
+            "[INTERACTIVE-TERMINAL-DEBUG] tool_use.input: {}",
+            serde_json::to_string_pretty(&tool_use.input)
+                .unwrap_or_else(|e| format!("Error: {}", e))
+        );
+
         let tool = self.tool(tool_use.name.as_ref());
         let mut title = SharedString::from(&tool_use.name);
         let mut kind = acp::ToolKind::Other;
@@ -2384,8 +2394,26 @@ where
         event_stream: ToolCallEventStream,
         cx: &mut App,
     ) -> Task<Result<AgentToolOutput>> {
+        let tool_name = T::name();
+        eprintln!(
+            "[INTERACTIVE-TERMINAL-DEBUG] AnyAgentTool::run called for tool '{}' with input: {}",
+            tool_name,
+            serde_json::to_string_pretty(&input).unwrap_or_else(|e| format!("Error: {}", e))
+        );
         cx.spawn(async move |cx| {
-            let input = serde_json::from_value(input)?;
+            let parsed_input: Result<T::Input, _> = serde_json::from_value(input.clone());
+            if let Err(ref e) = parsed_input {
+                eprintln!(
+                    "[INTERACTIVE-TERMINAL-DEBUG] Failed to parse input for tool '{}': {}",
+                    tool_name, e
+                );
+                eprintln!(
+                    "[INTERACTIVE-TERMINAL-DEBUG] Raw input was: {}",
+                    serde_json::to_string_pretty(&input)
+                        .unwrap_or_else(|e| format!("Error: {}", e))
+                );
+            }
+            let input = parsed_input?;
             let output = cx
                 .update(|cx| self.0.clone().run(input, event_stream, cx))?
                 .await?;

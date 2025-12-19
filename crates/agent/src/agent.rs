@@ -1447,10 +1447,36 @@ impl ThreadEnvironment for AcpThreadEnvironment {
         terminal_id: &acp::TerminalId,
         cx: &AsyncApp,
     ) -> Result<Rc<dyn TerminalHandle>> {
-        let terminal = self
+        eprintln!(
+            "[INTERACTIVE-TERMINAL-DEBUG] get_terminal called for terminal_id: {:?}",
+            terminal_id
+        );
+        let result = self
             .acp_thread
-            .read_with(cx, |thread, _cx| thread.terminal(terminal_id.clone()))??;
+            .read_with(cx, |thread, _cx| thread.terminal(terminal_id.clone()));
 
+        match &result {
+            Ok(Ok(terminal)) => {
+                eprintln!(
+                    "[INTERACTIVE-TERMINAL-DEBUG] get_terminal: found terminal {:?}",
+                    terminal_id
+                );
+            }
+            Ok(Err(e)) => {
+                eprintln!(
+                    "[INTERACTIVE-TERMINAL-DEBUG] get_terminal: terminal not found: {}",
+                    e
+                );
+            }
+            Err(e) => {
+                eprintln!(
+                    "[INTERACTIVE-TERMINAL-DEBUG] get_terminal: failed to read thread: {}",
+                    e
+                );
+            }
+        }
+
+        let terminal = result??;
         Ok(Rc::new(AcpTerminalHandle::new(terminal, None)) as _)
     }
 
@@ -1465,22 +1491,15 @@ impl ThreadEnvironment for AcpThreadEnvironment {
             thread.create_terminal(command, vec![], vec![], cwd, output_byte_limit, cx)
         });
 
-        let acp_thread = self.acp_thread.clone();
         cx.spawn(async move |cx| {
             let terminal = task?.await?;
 
-            let (drop_tx, drop_rx) = oneshot::channel();
-            let terminal_id = terminal.read_with(cx, |terminal, _cx| terminal.id().clone())?;
-
-            cx.spawn(async move |cx| {
-                drop_rx.await.ok();
-                acp_thread.update(cx, |thread, cx| thread.release_terminal(terminal_id, cx))
-            })
-            .detach();
-
+            // Don't use drop_tx/drop_rx - we want the terminal to stay in the map
+            // so that SendInput and Wait can find it later. The terminal will be
+            // released when explicitly killed or when the AcpThread is dropped.
             let handle = AcpTerminalHandle {
                 terminal,
-                _drop_tx: Some(drop_tx),
+                _drop_tx: None,
             };
 
             Ok(Rc::new(handle) as _)

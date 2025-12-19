@@ -2541,6 +2541,23 @@ impl AcpThreadView {
             .mr_5()
             .map(|this| {
                 if is_terminal_tool {
+                    // Determine the terminal action type from raw_input
+                    let terminal_label = tool_call
+                        .raw_input
+                        .as_ref()
+                        .and_then(|input| input.get("action"))
+                        .and_then(|action| action.as_object())
+                        .map(|obj| {
+                            if obj.contains_key("SendInput") {
+                                "Send Input to Process"
+                            } else if obj.contains_key("Wait") {
+                                "Wait on Process"
+                            } else {
+                                "Run Command"
+                            }
+                        })
+                        .unwrap_or("Run Command");
+
                     this.child(
                         v_flex()
                             .p_1p5()
@@ -2548,7 +2565,7 @@ impl AcpThreadView {
                             .text_ui_sm(cx)
                             .bg(self.tool_card_header_bg(cx))
                             .child(
-                                Label::new("Run Command")
+                                Label::new(terminal_label)
                                     .buffer_font(cx)
                                     .size(LabelSize::XSmall)
                                     .color(Color::Muted),
