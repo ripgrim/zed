@@ -41,7 +41,7 @@ pub struct TerminalToolInput {
     pub timeout_ms: Option<u64>,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
 pub enum TerminalAction {
     /// Executes a command in a terminal.
     /// For example, "git status" would run `git status`.
@@ -69,6 +69,25 @@ pub enum TerminalAction {
         /// The ID of the terminal to wait on (from a previous RunCmd).
         terminal_id: String,
     },
+}
+
+impl TerminalAction {
+    /// Returns the user-facing label for this action type.
+    pub fn ui_label(&self) -> &'static str {
+        match self {
+            TerminalAction::RunCmd { .. } => "Run Command",
+            TerminalAction::SendInput { .. } => "Send Input to Process",
+            TerminalAction::Wait { .. } => "Wait on Process",
+        }
+    }
+
+    /// Parses the action from raw JSON input (e.g., from a tool call's raw_input field).
+    /// Returns None if the JSON doesn't represent a valid TerminalToolInput.
+    pub fn parse_from_json(json: &serde_json::Value) -> Option<Self> {
+        serde_json::from_value::<TerminalToolInput>(json.clone())
+            .ok()
+            .map(|input| input.action)
+    }
 }
 
 pub struct TerminalTool {

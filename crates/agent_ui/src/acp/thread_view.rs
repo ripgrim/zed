@@ -2541,21 +2541,11 @@ impl AcpThreadView {
             .mr_5()
             .map(|this| {
                 if is_terminal_tool {
-                    // Determine the terminal action type from raw_input
                     let terminal_label = tool_call
                         .raw_input
                         .as_ref()
-                        .and_then(|input| input.get("action"))
-                        .and_then(|action| action.as_object())
-                        .map(|obj| {
-                            if obj.contains_key("SendInput") {
-                                "Send Input to Process"
-                            } else if obj.contains_key("Wait") {
-                                "Wait on Process"
-                            } else {
-                                "Run Command"
-                            }
-                        })
+                        .and_then(agent::TerminalAction::parse_from_json)
+                        .map(|action| action.ui_label())
                         .unwrap_or("Run Command");
 
                     this.child(
