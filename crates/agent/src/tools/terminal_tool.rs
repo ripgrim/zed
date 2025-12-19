@@ -45,9 +45,9 @@ pub struct TerminalToolInput {
 pub enum TerminalAction {
     /// Executes a command in a terminal.
     /// For example, "git status" would run `git status`.
-    /// Returns a terminal_id that can be used with SendInput or Wait.
+    /// Returns a terminal_id that can be used with SendInput.
     /// If the command doesn't exit within timeout_ms, returns the current output
-    /// and the process keeps running - use SendInput to interact or Wait to check again.
+    /// and the process keeps running - use SendInput to interact with it.
     RunCmd {
         /// The one-liner command to execute.
         command: String,
@@ -63,15 +63,6 @@ pub enum TerminalAction {
         /// The input string to send. A newline will be appended automatically.
         input: String,
     },
-    /// Waits for a running process and returns its current state.
-    /// Use this to check on a long-running process without sending input.
-    Wait {
-        /// The ID of the terminal to wait on (from a previous RunCmd).
-        terminal_id: String,
-        /// How long to wait (in milliseconds) before returning the current state.
-        /// If the process exits before this duration, returns immediately with the exit status.
-        duration_ms: u64,
-    },
 }
 
 impl TerminalAction {
@@ -80,7 +71,6 @@ impl TerminalAction {
         match self {
             TerminalAction::RunCmd { .. } => "Run Command",
             TerminalAction::SendInput { .. } => "Send Input to Process",
-            TerminalAction::Wait { .. } => "Wait on Process",
         }
     }
 
@@ -138,7 +128,6 @@ impl AgentTool for TerminalTool {
             let text = match &input.action {
                 TerminalAction::RunCmd { command, .. } => command.as_str(),
                 TerminalAction::SendInput { input, .. } => input.as_str(),
-                TerminalAction::Wait { terminal_id, .. } => terminal_id.as_str(),
             };
             let mut lines = text.lines();
             let first_line = lines.next().unwrap_or_default();
@@ -321,66 +310,6 @@ impl AgentTool for TerminalTool {
                     ))
                 })
             }
-            TerminalAction::Wait {
-                terminal_id,
-                duration_ms,
-            } => {
-                let terminal_id = acp::TerminalId::new(terminal_id.clone());
-                let duration = Duration::from_millis(*duration_ms);
-
-                let title: SharedString =
-                    MarkdownInlineCode(&format!("wait {}ms: {}", duration_ms, terminal_id.0))
-                        .to_string()
-                        .into();
-                let authorize = event_stream.authorize(title, cx);
-
-                cx.spawn(async move |cx| {
-                    authorize.await?;
-
-                    eprintln!(
-                        "[INTERACTIVE-TERMINAL-DEBUG] Wait: looking up terminal: {:?}, duration: {:?}",
-                        terminal_id, duration
-                    );
-
-                    let terminal = self.environment.get_terminal(&terminal_id, cx)?;
-
-                    let wait_duration = duration;
-                    let (exited, exit_status) = {
-                        let wait_for_exit = terminal.wait_for_exit(cx)?;
-                        let wait_task = cx.background_spawn(async move {
-                            smol::Timer::after(wait_duration).await;
-                        });
-
-                        futures::select! {
-                            status = wait_for_exit.clone().fuse() => {
-                                eprintln!(
-                                    "[INTERACTIVE-TERMINAL-DEBUG] Wait: process exited with status: {:?}",
-                                    status
-                                );
-                                (true, status)
-                            },
-                            _ = wait_task.fuse() => {
-                                eprintln!(
-                                    "[INTERACTIVE-TERMINAL-DEBUG] Wait: duration reached ({:?}), process still running",
-                                    wait_duration
-                                );
-                                (false, acp::TerminalExitStatus::new())
-                            }
-                        }
-                    };
-
-                    let output = terminal.current_output(cx)?;
-                    let terminal_id_str = terminal_id.0.to_string();
-
-                    Ok(process_wait_result(
-                        output,
-                        &terminal_id_str,
-                        exited,
-                        exit_status,
-                        wait_duration,
-                    ))
-                })
-            }
         }
     }
 }
@@ -442,75 +371,6 @@ fn process_run_cmd_result(
             "The command is still running after {} ms. Terminal ID: {}\n\n\
             You can:\n\
             - Use SendInput with terminal_id \"{}\" to send input (e.g., \"q\" to quit, or Ctrl+C as \"\\x03\")\n\
-            - Use Wait with terminal_id \"{}\" to check on it again\n\
-            - Make a different tool call or respond with text (this will kill the process)",
-            timeout_ms, terminal_id, terminal_id, terminal_id
-        );
-        if content_block.is_empty() {
-            still_running_msg
-        } else {
-            format!(
-                "{}\n\nCurrent terminal output:\n\n{}",
-                still_running_msg, content_block
-            )
-        }
-    }
-}
-
-fn process_wait_result(
-    output: acp::TerminalOutputResponse,
-    terminal_id: &str,
-    exited: bool,
-    exit_status: acp::TerminalExitStatus,
-    timeout: Duration,
-) -> String {
-    let content = output.output.trim();
-    let content_block = if content.is_empty() {
-        String::new()
-    } else if output.truncated {
-        format!(
-            "Output truncated. The first {} bytes:\n\n```\n{}\n```",
-            content.len(),
-            content
-        )
-    } else {
-        format!("```\n{}\n```", content)
-    };
-
-    if exited {
-        match exit_status.exit_code {
-            Some(0) => {
-                if content_block.is_empty() {
-                    "The process exited successfully.".to_string()
-                } else {
-                    format!("The process exited successfully.\n\n{}", content_block)
-                }
-            }
-            Some(code) => {
-                if content_block.is_empty() {
-                    format!("The process exited with code {}.", code)
-                } else {
-                    format!(
-                        "The process exited with code {}.\n\n{}",
-                        code, content_block
-                    )
-                }
-            }
-            None => {
-                if content_block.is_empty() {
-                    "The process was interrupted.".to_string()
-                } else {
-                    format!("The process was interrupted.\n\n{}", content_block)
-                }
-            }
-        }
-    } else {
-        let timeout_ms = timeout.as_millis();
-        let still_running_msg = format!(
-            "The process is still running after {} ms.\n\n\
-            You can:\n\
-            - Use SendInput with terminal_id \"{}\" to send input (e.g., \"q\" to quit, or Ctrl+C as \"\\x03\")\n\
-            - Use Wait with terminal_id \"{}\" to check on it again\n\
             - Make a different tool call or respond with text (this will kill the process)",
             timeout_ms, terminal_id, terminal_id
         );
