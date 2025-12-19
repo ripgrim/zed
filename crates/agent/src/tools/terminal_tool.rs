@@ -68,6 +68,9 @@ pub enum TerminalAction {
     Wait {
         /// The ID of the terminal to wait on (from a previous RunCmd).
         terminal_id: String,
+        /// How long to wait (in milliseconds) before returning the current state.
+        /// If the process exits before this duration, returns immediately with the exit status.
+        duration_ms: u64,
     },
 }
 
@@ -135,7 +138,7 @@ impl AgentTool for TerminalTool {
             let text = match &input.action {
                 TerminalAction::RunCmd { command, .. } => command.as_str(),
                 TerminalAction::SendInput { input, .. } => input.as_str(),
-                TerminalAction::Wait { terminal_id } => terminal_id.as_str(),
+                TerminalAction::Wait { terminal_id, .. } => terminal_id.as_str(),
             };
             let mut lines = text.lines();
             let first_line = lines.next().unwrap_or_default();
@@ -318,29 +321,34 @@ impl AgentTool for TerminalTool {
                     ))
                 })
             }
-            TerminalAction::Wait { terminal_id } => {
+            TerminalAction::Wait {
+                terminal_id,
+                duration_ms,
+            } => {
                 let terminal_id = acp::TerminalId::new(terminal_id.clone());
+                let duration = Duration::from_millis(*duration_ms);
 
-                let title: SharedString = MarkdownInlineCode(&format!("wait: {}", terminal_id.0))
-                    .to_string()
-                    .into();
+                let title: SharedString =
+                    MarkdownInlineCode(&format!("wait {}ms: {}", duration_ms, terminal_id.0))
+                        .to_string()
+                        .into();
                 let authorize = event_stream.authorize(title, cx);
 
                 cx.spawn(async move |cx| {
                     authorize.await?;
 
                     eprintln!(
-                        "[INTERACTIVE-TERMINAL-DEBUG] Wait: looking up terminal: {:?}",
-                        terminal_id
+                        "[INTERACTIVE-TERMINAL-DEBUG] Wait: looking up terminal: {:?}, duration: {:?}",
+                        terminal_id, duration
                     );
 
                     let terminal = self.environment.get_terminal(&terminal_id, cx)?;
 
-                    let timeout = timeout.unwrap_or(Duration::from_millis(5000));
+                    let wait_duration = duration;
                     let (exited, exit_status) = {
                         let wait_for_exit = terminal.wait_for_exit(cx)?;
-                        let timeout_task = cx.background_spawn(async move {
-                            smol::Timer::after(timeout).await;
+                        let wait_task = cx.background_spawn(async move {
+                            smol::Timer::after(wait_duration).await;
                         });
 
                         futures::select! {
@@ -351,10 +359,10 @@ impl AgentTool for TerminalTool {
                                 );
                                 (true, status)
                             },
-                            _ = timeout_task.fuse() => {
+                            _ = wait_task.fuse() => {
                                 eprintln!(
-                                    "[INTERACTIVE-TERMINAL-DEBUG] Wait: timeout reached ({:?}), process still running",
-                                    timeout
+                                    "[INTERACTIVE-TERMINAL-DEBUG] Wait: duration reached ({:?}), process still running",
+                                    wait_duration
                                 );
                                 (false, acp::TerminalExitStatus::new())
                             }
@@ -369,7 +377,7 @@ impl AgentTool for TerminalTool {
                         &terminal_id_str,
                         exited,
                         exit_status,
-                        timeout,
+                        wait_duration,
                     ))
                 })
             }
