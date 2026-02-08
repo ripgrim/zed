@@ -463,6 +463,7 @@ fn forward_event_to_acp_thread(
                 .log_err();
         }
         ThreadEvent::Stop(_) => {}
+        ThreadEvent::ToolCallContinuation(_) => {}
     }
 }
 

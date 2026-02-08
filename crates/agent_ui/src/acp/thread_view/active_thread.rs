@@ -571,21 +571,33 @@ impl AcpThreadView {
     // sending
 
     pub fn send(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let thread = &self.thread;
-
         if self.is_loading_contents {
             return;
         }
 
         let message_editor = self.message_editor.clone();
         let is_editor_empty = message_editor.read(cx).is_empty(cx);
-        let is_generating = thread.read(cx).status() != ThreadStatus::Idle;
+        let is_generating = self.thread.read(cx).status() != ThreadStatus::Idle;
 
         let has_queued = self.has_queued_messages();
         if is_editor_empty && self.can_fast_track_queue && has_queued {
             self.can_fast_track_queue = false;
             self.send_queued_message_at_index(0, true, window, cx);
             return;
+        }
+
+        if is_generating {
+            let continuation_id = self
+                .thread
+                .read(cx)
+                .first_tool_awaiting_continuation()
+                .map(|tc| tc.id.clone());
+            if let Some(tool_call_id) = continuation_id {
+                self.do_continue_tool_call(tool_call_id, window, cx);
+                if is_editor_empty {
+                    return;
+                }
+            }
         }
 
         if is_editor_empty {
@@ -600,7 +612,7 @@ impl AcpThreadView {
         let text = message_editor.read(cx).text(cx);
         let text = text.trim();
         if text == "/login" || text == "/logout" {
-            let connection = thread.read(cx).connection().clone();
+            let connection = self.thread.read(cx).connection().clone();
             let can_login = !connection.auth_methods().is_empty() || self.login.is_some();
             // Does the agent have a specific logout command? Prefer that in case they need to reset internal state.
             let logout_supported = text == "/logout"
@@ -1550,6 +1562,77 @@ impl AcpThreadView {
         }
 
         telemetry::event!("Follow Agent Selected", following = !following);
+    }
+
+    pub fn handle_continuation_required(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.navigate_to_agent_location(window, cx);
+        cx.notify();
+    }
+
+    fn navigate_to_agent_location(&self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(project) = self.project.upgrade() else {
+            return;
+        };
+        let Some(agent_location) = project.read(cx).agent_location() else {
+            return;
+        };
+        let Some(buffer) = agent_location.buffer.upgrade() else {
+            return;
+        };
+        let Some(project_path) = buffer.read(cx).file().map(|file| project::ProjectPath {
+            worktree_id: file.worktree_id(cx),
+            path: file.path().clone(),
+        }) else {
+            return;
+        };
+
+        let position = agent_location.position;
+        let selection_end = agent_location.selection_end;
+
+        let Some(open_task) = self
+            .workspace
+            .update(cx, |workspace, cx| {
+                workspace.open_path(project_path, None, false, window, cx)
+            })
+            .log_err()
+        else {
+            return;
+        };
+
+        window
+            .spawn(cx, async move |cx| {
+                let item = open_task.await?;
+                let Some(active_editor) = item.downcast::<Editor>() else {
+                    return anyhow::Ok(());
+                };
+                active_editor.update_in(cx, |editor, window, cx| {
+                    let multibuffer = editor.buffer().read(cx);
+                    let Some(excerpt_id) = multibuffer.excerpt_ids().first().cloned() else {
+                        return;
+                    };
+                    let start = editor::Anchor::in_buffer(excerpt_id, position);
+                    let end = selection_end
+                        .map(|e| editor::Anchor::in_buffer(excerpt_id, e))
+                        .unwrap_or(start);
+                    editor.change_selections(Default::default(), window, cx, |selections| {
+                        selections.select_anchor_ranges([start..end]);
+                    });
+                })?;
+                anyhow::Ok(())
+            })
+            .detach_and_log_err(cx);
+    }
+
+    fn do_continue_tool_call(
+        &mut self,
+        tool_call_id: acp::ToolCallId,
+        _window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.thread.update(cx, |thread, cx| {
+            thread.continue_tool_call(tool_call_id, cx);
+        });
+        cx.notify();
     }
 
     // other
@@ -4502,6 +4585,10 @@ impl AcpThreadView {
             tool_call.status,
             ToolCallStatus::WaitingForConfirmation { .. }
         );
+        let needs_continuation = matches!(
+            tool_call.status,
+            ToolCallStatus::WaitingForContinuation { .. }
+        );
         let is_terminal_tool = matches!(tool_call.kind, acp::ToolKind::Execute);
 
         let is_edit =
@@ -4523,13 +4610,15 @@ impl AcpThreadView {
                 && diff.read(cx).has_revealed_range(cx)
         });
 
-        let use_card_layout = needs_confirmation || is_edit || is_terminal_tool;
+        let use_card_layout =
+            needs_confirmation || needs_continuation || is_edit || is_terminal_tool;
 
         let has_image_content = tool_call.content.iter().any(|c| c.image().is_some());
-        let is_collapsible = !tool_call.content.is_empty() && !needs_confirmation;
+        let is_collapsible =
+            !tool_call.content.is_empty() && !needs_confirmation && !needs_continuation;
         let mut is_open = self.expanded_tool_calls.contains(&tool_call.id);
 
-        is_open |= needs_confirmation;
+        is_open |= needs_confirmation || needs_continuation;
 
         let should_show_raw_input = !is_terminal_tool && !is_edit && !has_image_content;
 
@@ -4540,16 +4629,13 @@ impl AcpThreadView {
                 .buffer_font(cx)
         };
 
-        let tool_output_display = if is_open {
-            match &tool_call.status {
-                ToolCallStatus::WaitingForConfirmation { options, .. } => v_flex()
-                    .w_full()
-                    .children(
-                        tool_call
-                            .content
-                            .iter()
-                            .enumerate()
-                            .map(|(content_ix, content)| {
+        let tool_output_display =
+            if is_open {
+                match &tool_call.status {
+                    ToolCallStatus::WaitingForConfirmation { options, .. } => v_flex()
+                        .w_full()
+                        .children(tool_call.content.iter().enumerate().map(
+                            |(content_ix, content)| {
                                 div()
                                     .child(self.render_tool_call_content(
                                         entry_ix,
@@ -4563,59 +4649,145 @@ impl AcpThreadView {
                                         cx,
                                     ))
                                     .into_any_element()
-                            }),
-                    )
-                    .when(should_show_raw_input, |this| {
-                        let is_raw_input_expanded =
-                            self.expanded_tool_call_raw_inputs.contains(&tool_call.id);
+                            },
+                        ))
+                        .when(should_show_raw_input, |this| {
+                            let is_raw_input_expanded =
+                                self.expanded_tool_call_raw_inputs.contains(&tool_call.id);
 
-                        let input_header = if is_raw_input_expanded {
-                            "Raw Input:"
-                        } else {
-                            "View Raw Input"
-                        };
+                            let input_header = if is_raw_input_expanded {
+                                "Raw Input:"
+                            } else {
+                                "View Raw Input"
+                            };
 
-                        this.child(
-                            v_flex()
-                                .p_2()
-                                .gap_1()
+                            this.child(
+                                v_flex()
+                                    .p_2()
+                                    .gap_1()
+                                    .border_t_1()
+                                    .border_color(self.tool_card_border_color(cx))
+                                    .child(
+                                        h_flex()
+                                            .id("disclosure_container")
+                                            .pl_0p5()
+                                            .gap_1()
+                                            .justify_between()
+                                            .rounded_xs()
+                                            .hover(|s| s.bg(cx.theme().colors().element_hover))
+                                            .child(input_output_header(input_header.into()))
+                                            .child(
+                                                Disclosure::new(
+                                                    ("raw-input-disclosure", entry_ix),
+                                                    is_raw_input_expanded,
+                                                )
+                                                .opened_icon(IconName::ChevronUp)
+                                                .closed_icon(IconName::ChevronDown),
+                                            )
+                                            .on_click(cx.listener({
+                                                let id = tool_call.id.clone();
+
+                                                move |this: &mut Self, _, _, cx| {
+                                                    if this
+                                                        .expanded_tool_call_raw_inputs
+                                                        .contains(&id)
+                                                    {
+                                                        this.expanded_tool_call_raw_inputs
+                                                            .remove(&id);
+                                                    } else {
+                                                        this.expanded_tool_call_raw_inputs
+                                                            .insert(id.clone());
+                                                    }
+                                                    cx.notify();
+                                                }
+                                            })),
+                                    )
+                                    .when(is_raw_input_expanded, |this| {
+                                        this.children(tool_call.raw_input_markdown.clone().map(
+                                            |input| {
+                                                self.render_markdown(
+                                                    input,
+                                                    MarkdownStyle::themed(
+                                                        MarkdownFont::Agent,
+                                                        window,
+                                                        cx,
+                                                    ),
+                                                )
+                                            },
+                                        ))
+                                    }),
+                            )
+                        })
+                        .child(self.render_permission_buttons(
+                            options,
+                            entry_ix,
+                            tool_call.id.clone(),
+                            cx,
+                        ))
+                        .into_any(),
+                    ToolCallStatus::WaitingForContinuation { .. } => v_flex()
+                        .w_full()
+                        .children(tool_call.content.iter().enumerate().map(
+                            |(content_ix, content)| {
+                                div()
+                                    .child(self.render_tool_call_content(
+                                        entry_ix,
+                                        content,
+                                        content_ix,
+                                        tool_call,
+                                        use_card_layout,
+                                        has_image_content,
+                                        false,
+                                        window,
+                                        cx,
+                                    ))
+                                    .into_any_element()
+                            },
+                        ))
+                        .child(
+                            div()
+                                .p_1()
                                 .border_t_1()
                                 .border_color(self.tool_card_border_color(cx))
                                 .child(
-                                    h_flex()
-                                        .id("disclosure_container")
-                                        .pl_0p5()
-                                        .gap_1()
-                                        .justify_between()
-                                        .rounded_xs()
-                                        .hover(|s| s.bg(cx.theme().colors().element_hover))
-                                        .child(input_output_header(input_header.into()))
-                                        .child(
-                                            Disclosure::new(
-                                                ("raw-input-disclosure", entry_ix),
-                                                is_raw_input_expanded,
-                                            )
-                                            .opened_icon(IconName::ChevronUp)
-                                            .closed_icon(IconName::ChevronDown),
-                                        )
+                                    Button::new(("continue", entry_ix), "Continue")
+                                        .icon(IconName::ArrowRight)
+                                        .icon_position(IconPosition::Start)
+                                        .icon_size(IconSize::XSmall)
+                                        .label_size(LabelSize::Small)
                                         .on_click(cx.listener({
                                             let id = tool_call.id.clone();
-
-                                            move |this: &mut Self, _, _, cx| {
-                                                if this.expanded_tool_call_raw_inputs.contains(&id)
-                                                {
-                                                    this.expanded_tool_call_raw_inputs.remove(&id);
-                                                } else {
-                                                    this.expanded_tool_call_raw_inputs
-                                                        .insert(id.clone());
-                                                }
-                                                cx.notify();
+                                            move |this, _, window, cx| {
+                                                this.do_continue_tool_call(id.clone(), window, cx);
                                             }
                                         })),
-                                )
-                                .when(is_raw_input_expanded, |this| {
-                                    this.children(tool_call.raw_input_markdown.clone().map(
-                                        |input| {
+                                ),
+                        )
+                        .into_any(),
+                    ToolCallStatus::Pending | ToolCallStatus::InProgress
+                        if is_edit
+                            && tool_call.content.is_empty()
+                            && self.as_native_connection(cx).is_some() =>
+                    {
+                        self.render_diff_loading(cx)
+                    }
+                    ToolCallStatus::Pending
+                    | ToolCallStatus::InProgress
+                    | ToolCallStatus::Completed
+                    | ToolCallStatus::Failed
+                    | ToolCallStatus::Canceled => v_flex()
+                        .when(should_show_raw_input, |this| {
+                            this.mt_1p5().w_full().child(
+                                v_flex()
+                                    .ml(rems(0.4))
+                                    .px_3p5()
+                                    .pb_1()
+                                    .gap_1()
+                                    .border_l_1()
+                                    .border_color(self.tool_card_border_color(cx))
+                                    .child(input_output_header("Raw Input:".into()))
+                                    .children(tool_call.raw_input_markdown.clone().map(|input| {
+                                        div().id(("tool-call-raw-input-markdown", entry_ix)).child(
                                             self.render_markdown(
                                                 input,
                                                 MarkdownStyle::themed(
@@ -4623,58 +4795,14 @@ impl AcpThreadView {
                                                     window,
                                                     cx,
                                                 ),
-                                            )
-                                        },
-                                    ))
-                                }),
-                        )
-                    })
-                    .child(self.render_permission_buttons(
-                        options,
-                        entry_ix,
-                        tool_call.id.clone(),
-                        cx,
-                    ))
-                    .into_any(),
-                ToolCallStatus::Pending | ToolCallStatus::InProgress
-                    if is_edit
-                        && tool_call.content.is_empty()
-                        && self.as_native_connection(cx).is_some() =>
-                {
-                    self.render_diff_loading(cx)
-                }
-                ToolCallStatus::Pending
-                | ToolCallStatus::InProgress
-                | ToolCallStatus::Completed
-                | ToolCallStatus::Failed
-                | ToolCallStatus::Canceled => v_flex()
-                    .when(should_show_raw_input, |this| {
-                        this.mt_1p5().w_full().child(
-                            v_flex()
-                                .ml(rems(0.4))
-                                .px_3p5()
-                                .pb_1()
-                                .gap_1()
-                                .border_l_1()
-                                .border_color(self.tool_card_border_color(cx))
-                                .child(input_output_header("Raw Input:".into()))
-                                .children(tool_call.raw_input_markdown.clone().map(|input| {
-                                    div().id(("tool-call-raw-input-markdown", entry_ix)).child(
-                                        self.render_markdown(
-                                            input,
-                                            MarkdownStyle::themed(MarkdownFont::Agent, window, cx),
-                                        ),
-                                    )
-                                }))
-                                .child(input_output_header("Output:".into())),
-                        )
-                    })
-                    .children(
-                        tool_call
-                            .content
-                            .iter()
-                            .enumerate()
-                            .map(|(content_ix, content)| {
+                                            ),
+                                        )
+                                    }))
+                                    .child(input_output_header("Output:".into())),
+                            )
+                        })
+                        .children(tool_call.content.iter().enumerate().map(
+                            |(content_ix, content)| {
                                 div().id(("tool-call-output", entry_ix)).child(
                                     self.render_tool_call_content(
                                         entry_ix,
@@ -4688,15 +4816,15 @@ impl AcpThreadView {
                                         cx,
                                     ),
                                 )
-                            }),
-                    )
-                    .into_any(),
-                ToolCallStatus::Rejected => Empty.into_any(),
-            }
-            .into()
-        } else {
-            None
-        };
+                            },
+                        ))
+                        .into_any(),
+                    ToolCallStatus::Rejected => Empty.into_any(),
+                }
+                .into()
+            } else {
+                None
+            };
 
         v_flex()
             .map(|this| {

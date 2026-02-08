@@ -367,19 +367,21 @@ impl FollowableItem for Editor {
     fn update_agent_location(
         &mut self,
         location: language::Anchor,
+        end: Option<language::Anchor>,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
         let buffer = self.buffer.read(cx);
         let buffer = buffer.read(cx);
-        let Some(position) = buffer.as_singleton_anchor(location) else {
+        let Some(start_position) = buffer.as_singleton_anchor(location) else {
             return;
         };
+        let end_position = end.and_then(|e| buffer.as_singleton_anchor(e));
         let selection = Selection {
             id: 0,
             reversed: false,
-            start: position,
-            end: position,
+            start: start_position,
+            end: end_position.unwrap_or(start_position),
             goal: SelectionGoal::None,
         };
         drop(buffer);

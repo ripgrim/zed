@@ -5400,8 +5400,12 @@ impl Workspace {
             if let Some(item) = item {
                 item.view
                     .set_leader_id(Some(CollaboratorId::Agent), window, cx);
-                item.view
-                    .update_agent_location(agent_location.position, window, cx);
+                item.view.update_agent_location(
+                    agent_location.position,
+                    agent_location.selection_end,
+                    window,
+                    cx,
+                );
             }
         } else {
             follower_state.active_view_id = None;

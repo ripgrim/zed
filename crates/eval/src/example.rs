@@ -328,6 +328,10 @@ impl ExampleContext {
                         "{}Bug: Tool confirmation should not be required in eval",
                         log_prefix
                     ),
+                    ThreadEvent::ToolCallContinuation(_) => panic!(
+                        "{}Bug: Tool continuation should not be required in eval",
+                        log_prefix
+                    ),
                     ThreadEvent::Retry(status) => {
                         println!("{log_prefix} Got retry: {status:?}");
                     }

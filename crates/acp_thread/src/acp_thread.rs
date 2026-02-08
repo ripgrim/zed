@@ -466,6 +466,7 @@ impl From<&ResolvedLocation> for AgentLocation {
         Self {
             buffer: value.buffer.downgrade(),
             position: value.position,
+            selection_end: None,
         }
     }
 }
@@ -480,6 +481,8 @@ pub enum ToolCallStatus {
         options: PermissionOptions,
         respond_tx: oneshot::Sender<acp::PermissionOptionId>,
     },
+    /// The tool is waiting for the user to continue (e.g. Point tool walkthrough).
+    WaitingForContinuation { respond_tx: oneshot::Sender<()> },
     /// The tool call is currently running.
     InProgress,
     /// The tool call completed successfully.
@@ -512,6 +515,7 @@ impl Display for ToolCallStatus {
             match self {
                 ToolCallStatus::Pending => "Pending",
                 ToolCallStatus::WaitingForConfirmation { .. } => "Waiting for confirmation",
+                ToolCallStatus::WaitingForContinuation { .. } => "Waiting for continuation",
                 ToolCallStatus::InProgress => "In Progress",
                 ToolCallStatus::Completed => "Completed",
                 ToolCallStatus::Failed => "Failed",
@@ -986,6 +990,7 @@ pub enum AcpThreadEvent {
     EntryUpdated(usize),
     EntriesRemoved(Range<usize>),
     ToolAuthorizationRequired,
+    ContinuationRequired,
     Retry(RetryStatus),
     Stopped,
     Error,
@@ -1835,6 +1840,46 @@ impl AcpThread {
         first_tool_call
     }
 
+    pub fn request_continuation(
+        &mut self,
+        tool_call: acp::ToolCallUpdate,
+        cx: &mut Context<Self>,
+    ) -> Result<BoxFuture<'static, ()>> {
+        let (tx, rx) = oneshot::channel();
+        self.upsert_tool_call_inner(
+            tool_call,
+            ToolCallStatus::WaitingForContinuation { respond_tx: tx },
+            cx,
+        )?;
+        cx.emit(AcpThreadEvent::ContinuationRequired);
+        Ok(async {
+            rx.await.ok();
+        }
+        .boxed())
+    }
+
+    pub fn continue_tool_call(&mut self, id: acp::ToolCallId, cx: &mut Context<Self>) {
+        let Some((ix, call)) = self.tool_call_mut(&id) else {
+            return;
+        };
+        let status = mem::replace(&mut call.status, ToolCallStatus::InProgress);
+        if let ToolCallStatus::WaitingForContinuation { respond_tx } = status {
+            respond_tx.send(()).ok();
+        }
+        cx.emit(AcpThreadEvent::EntryUpdated(ix));
+    }
+
+    pub fn first_tool_awaiting_continuation(&self) -> Option<&ToolCall> {
+        self.entries.iter().rev().find_map(|entry| match entry {
+            AgentThreadEntry::ToolCall(call)
+                if matches!(call.status, ToolCallStatus::WaitingForContinuation { .. }) =>
+            {
+                Some(call)
+            }
+            _ => None,
+        })
+    }
+
     pub fn plan(&self) -> &Plan {
         &self.plan
     }
@@ -2286,6 +2331,7 @@ impl AcpThread {
                     Some(AgentLocation {
                         buffer: buffer.downgrade(),
                         position: start,
+                        selection_end: None,
                     }),
                     cx,
                 );
@@ -2342,6 +2388,7 @@ impl AcpThread {
                             .last()
                             .map(|(range, _)| range.end)
                             .unwrap_or(Anchor::min_for_buffer(buffer.read(cx).remote_id())),
+                        selection_end: None,
                     }),
                     cx,
                 );
@@ -4426,5 +4473,148 @@ mod tests {
             "send should succeed even when new message added during update_last_checkpoint: {:?}",
             result.err()
         );
+    }
+
+    #[gpui::test]
+    async fn test_continuation_lifecycle(cx: &mut TestAppContext) {
+        init_test(cx);
+
+        let fs = FakeFs::new(cx.executor());
+        let project = Project::test(fs, [], cx).await;
+        let tool_call_id = acp::ToolCallId::new("point-tool-1");
+
+        let connection = Rc::new(FakeAgentConnection::new());
+        let thread = cx
+            .update(|cx| connection.new_thread(project, Path::new(path!("/test")), cx))
+            .await
+            .unwrap();
+
+        // Create a tool call entry directly via handle_session_update.
+        thread
+            .update(cx, |thread, cx| {
+                thread.handle_session_update(
+                    acp::SessionUpdate::ToolCall(
+                        acp::ToolCall::new(tool_call_id.clone(), "Point at code")
+                            .kind(acp::ToolKind::Read)
+                            .status(acp::ToolCallStatus::InProgress),
+                    ),
+                    cx,
+                )
+            })
+            .unwrap();
+
+        // Track emitted events via a subscription on the TestAppContext.
+        let received_continuation_required = Rc::new(AtomicBool::new(false));
+        let received_entry_updated = Rc::new(AtomicBool::new(false));
+        let _subscription = cx.update(|cx| {
+            let continuation_flag = received_continuation_required.clone();
+            let updated_flag = received_entry_updated.clone();
+            cx.subscribe(&thread, move |_, event, _| match event {
+                AcpThreadEvent::ContinuationRequired => {
+                    continuation_flag.store(true, SeqCst);
+                }
+                AcpThreadEvent::EntryUpdated(_) => {
+                    updated_flag.store(true, SeqCst);
+                }
+                _ => {}
+            })
+        });
+
+        // Step 1: Call request_continuation — transitions to WaitingForContinuation.
+        let continuation_future = thread.update(cx, |thread, cx| {
+            thread
+                .request_continuation(
+                    acp::ToolCallUpdate::new(
+                        tool_call_id.to_string(),
+                        acp::ToolCallUpdateFields::new().title("Point at `example.rs`".to_string()),
+                    ),
+                    cx,
+                )
+                .expect("request_continuation should succeed")
+        });
+
+        // Assert ContinuationRequired event was emitted.
+        assert!(
+            received_continuation_required.load(SeqCst),
+            "ContinuationRequired event should have been emitted"
+        );
+
+        // Assert status is WaitingForContinuation.
+        thread.update(cx, |thread, _| {
+            let (_, call) = thread
+                .tool_call(&tool_call_id)
+                .expect("tool call should exist");
+            assert!(
+                matches!(call.status, ToolCallStatus::WaitingForContinuation { .. }),
+                "Expected WaitingForContinuation, got {}",
+                call.status
+            );
+        });
+
+        // Assert first_tool_awaiting_continuation returns this tool call.
+        thread.read_with(cx, |thread, _| {
+            let awaiting = thread
+                .first_tool_awaiting_continuation()
+                .expect("should have a tool awaiting continuation");
+            assert_eq!(awaiting.id, tool_call_id);
+        });
+
+        // Reset the entry-updated flag before continue so we can check it fires.
+        received_entry_updated.store(false, SeqCst);
+
+        // Step 2: Call continue_tool_call — transitions to InProgress and resolves the future.
+        thread.update(cx, |thread, cx| {
+            thread.continue_tool_call(tool_call_id.clone(), cx);
+        });
+
+        // Assert EntryUpdated event was emitted.
+        assert!(
+            received_entry_updated.load(SeqCst),
+            "EntryUpdated event should have been emitted after continue"
+        );
+
+        // Assert status transitions to InProgress.
+        thread.update(cx, |thread, _| {
+            let (_, call) = thread
+                .tool_call(&tool_call_id)
+                .expect("tool call should exist");
+            assert!(
+                matches!(call.status, ToolCallStatus::InProgress),
+                "Expected InProgress after continue, got {}",
+                call.status
+            );
+        });
+
+        // Assert continuation future resolves.
+        continuation_future.await;
+
+        // Assert first_tool_awaiting_continuation returns None.
+        thread.read_with(cx, |thread, _| {
+            assert!(
+                thread.first_tool_awaiting_continuation().is_none(),
+                "No tool should be awaiting continuation after continue"
+            );
+        });
+
+        // Step 3: Calling continue_tool_call with a non-waiting ID is a no-op (no panic).
+        thread.update(cx, |thread, cx| {
+            thread.continue_tool_call(acp::ToolCallId::new("nonexistent-id"), cx);
+        });
+
+        // Also verify calling continue on the same (now InProgress) tool call is a no-op.
+        thread.update(cx, |thread, cx| {
+            thread.continue_tool_call(tool_call_id.clone(), cx);
+        });
+
+        thread.update(cx, |thread, _| {
+            let (_, call) = thread
+                .tool_call(&tool_call_id)
+                .expect("tool call should exist");
+            assert!(
+                matches!(call.status, ToolCallStatus::InProgress),
+                "Status should still be InProgress after redundant continue, got {}",
+                call.status
+            );
+        });
     }
 }

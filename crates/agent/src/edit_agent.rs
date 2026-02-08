@@ -173,6 +173,7 @@ impl EditAgent {
                     Some(AgentLocation {
                         buffer: buffer.downgrade(),
                         position: language::Anchor::max_for_buffer(buffer.read(cx).remote_id()),
+                        selection_end: None,
                     }),
                     cx,
                 )
@@ -198,6 +199,7 @@ impl EditAgent {
                                     position: language::Anchor::max_for_buffer(
                                         buffer.read(cx).remote_id(),
                                     ),
+                                    selection_end: None,
                                 }),
                                 cx,
                             )
@@ -289,6 +291,7 @@ impl EditAgent {
                             Some(AgentLocation {
                                 buffer: buffer.downgrade(),
                                 position: old_range.end,
+                                selection_end: None,
                             }),
                             cx,
                         );
@@ -370,6 +373,7 @@ impl EditAgent {
                             Some(AgentLocation {
                                 buffer: buffer.downgrade(),
                                 position: max_edit_end,
+                                selection_end: None,
                             }),
                             cx,
                         );
@@ -1006,7 +1010,8 @@ mod tests {
             project.read_with(cx, |project, _| project.agent_location()),
             Some(AgentLocation {
                 buffer: buffer.downgrade(),
-                position: buffer.read_with(cx, |buffer, _| buffer.anchor_before(Point::new(0, 3)))
+                position: buffer.read_with(cx, |buffer, _| buffer.anchor_before(Point::new(0, 3))),
+                selection_end: None,
             })
         );
 
@@ -1024,7 +1029,8 @@ mod tests {
             project.read_with(cx, |project, _| project.agent_location()),
             Some(AgentLocation {
                 buffer: buffer.downgrade(),
-                position: buffer.read_with(cx, |buffer, _| buffer.anchor_before(Point::new(0, 3)))
+                position: buffer.read_with(cx, |buffer, _| buffer.anchor_before(Point::new(0, 3))),
+                selection_end: None,
             })
         );
 
@@ -1042,7 +1048,8 @@ mod tests {
             project.read_with(cx, |project, _| project.agent_location()),
             Some(AgentLocation {
                 buffer: buffer.downgrade(),
-                position: buffer.read_with(cx, |buffer, _| buffer.anchor_before(Point::new(0, 5)))
+                position: buffer.read_with(cx, |buffer, _| buffer.anchor_before(Point::new(0, 5))),
+                selection_end: None,
             })
         );
 
@@ -1058,7 +1065,8 @@ mod tests {
             project.read_with(cx, |project, _| project.agent_location()),
             Some(AgentLocation {
                 buffer: buffer.downgrade(),
-                position: buffer.read_with(cx, |buffer, _| buffer.anchor_before(Point::new(0, 5)))
+                position: buffer.read_with(cx, |buffer, _| buffer.anchor_before(Point::new(0, 5))),
+                selection_end: None,
             })
         );
 
@@ -1077,7 +1085,8 @@ mod tests {
             project.read_with(cx, |project, _| project.agent_location()),
             Some(AgentLocation {
                 buffer: buffer.downgrade(),
-                position: buffer.read_with(cx, |buffer, _| buffer.anchor_before(Point::new(0, 5)))
+                position: buffer.read_with(cx, |buffer, _| buffer.anchor_before(Point::new(0, 5))),
+                selection_end: None,
             })
         );
 
@@ -1093,7 +1102,8 @@ mod tests {
             project.read_with(cx, |project, _| project.agent_location()),
             Some(AgentLocation {
                 buffer: buffer.downgrade(),
-                position: buffer.read_with(cx, |buffer, _| buffer.anchor_before(Point::new(0, 5)))
+                position: buffer.read_with(cx, |buffer, _| buffer.anchor_before(Point::new(0, 5))),
+                selection_end: None,
             })
         );
 
@@ -1115,7 +1125,8 @@ mod tests {
             project.read_with(cx, |project, _| project.agent_location()),
             Some(AgentLocation {
                 buffer: buffer.downgrade(),
-                position: buffer.read_with(cx, |buffer, _| buffer.anchor_before(Point::new(2, 3)))
+                position: buffer.read_with(cx, |buffer, _| buffer.anchor_before(Point::new(2, 3))),
+                selection_end: None,
             })
         );
 
@@ -1138,7 +1149,8 @@ mod tests {
             project.read_with(cx, |project, _| project.agent_location()),
             Some(AgentLocation {
                 buffer: buffer.downgrade(),
-                position: buffer.read_with(cx, |buffer, _| buffer.anchor_before(Point::new(3, 3)))
+                position: buffer.read_with(cx, |buffer, _| buffer.anchor_before(Point::new(3, 3))),
+                selection_end: None,
             })
         );
 
@@ -1156,7 +1168,8 @@ mod tests {
             project.read_with(cx, |project, _| project.agent_location()),
             Some(AgentLocation {
                 buffer: buffer.downgrade(),
-                position: buffer.read_with(cx, |buffer, _| buffer.anchor_before(Point::new(2, 3)))
+                position: buffer.read_with(cx, |buffer, _| buffer.anchor_before(Point::new(2, 3))),
+                selection_end: None,
             })
         );
 
@@ -1171,7 +1184,8 @@ mod tests {
             project.read_with(cx, |project, _| project.agent_location()),
             Some(AgentLocation {
                 buffer: buffer.downgrade(),
-                position: buffer.read_with(cx, |buffer, _| buffer.anchor_before(Point::new(2, 3)))
+                position: buffer.read_with(cx, |buffer, _| buffer.anchor_before(Point::new(2, 3))),
+                selection_end: None,
             })
         );
     }
@@ -1206,6 +1220,7 @@ mod tests {
                 position: language::Anchor::max_for_buffer(
                     cx.update(|cx| buffer.read(cx).remote_id())
                 ),
+                selection_end: None,
             })
         );
 
@@ -1226,6 +1241,7 @@ mod tests {
                 position: language::Anchor::max_for_buffer(
                     cx.update(|cx| buffer.read(cx).remote_id())
                 ),
+                selection_end: None,
             })
         );
 
@@ -1246,6 +1262,7 @@ mod tests {
                 position: language::Anchor::max_for_buffer(
                     cx.update(|cx| buffer.read(cx).remote_id())
                 ),
+                selection_end: None,
             })
         );
 
@@ -1266,6 +1283,7 @@ mod tests {
                 position: language::Anchor::max_for_buffer(
                     cx.update(|cx| buffer.read(cx).remote_id())
                 ),
+                selection_end: None,
             })
         );
 
@@ -1283,6 +1301,7 @@ mod tests {
                 position: language::Anchor::max_for_buffer(
                     cx.update(|cx| buffer.read(cx).remote_id())
                 ),
+                selection_end: None,
             })
         );
     }

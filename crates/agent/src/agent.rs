@@ -1048,6 +1048,19 @@ impl NativeAgentConnection {
                                 })
                                 .detach();
                             }
+                            ThreadEvent::ToolCallContinuation(ToolCallContinuation {
+                                tool_call,
+                                response,
+                            }) => {
+                                let outcome = acp_thread.update(cx, |thread, cx| {
+                                    thread.request_continuation(tool_call, cx)
+                                })??;
+                                cx.background_spawn(async move {
+                                    outcome.await;
+                                    response.send(()).ok();
+                                })
+                                .detach();
+                            }
                             ThreadEvent::ToolCall(tool_call) => {
                                 acp_thread.update(cx, |thread, cx| {
                                     thread.upsert_tool_call(tool_call, cx)

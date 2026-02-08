@@ -255,6 +255,7 @@ struct DownloadingFile {
 pub struct AgentLocation {
     pub buffer: WeakEntity<Buffer>,
     pub position: Anchor,
+    pub selection_end: Option<Anchor>,
 }
 
 #[derive(Default)]
@@ -5868,7 +5869,7 @@ impl Project {
                         Arc::from([language::Selection {
                             id: 0,
                             start: location.position,
-                            end: location.position,
+                            end: location.selection_end.unwrap_or(location.position),
                             reversed: false,
                             goal: language::SelectionGoal::None,
                         }]),

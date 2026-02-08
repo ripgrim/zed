@@ -948,6 +948,13 @@ impl AcpServerView {
             AcpThreadEvent::ToolAuthorizationRequired => {
                 self.notify_with_sound("Waiting for tool confirmation", IconName::Info, window, cx);
             }
+            AcpThreadEvent::ContinuationRequired => {
+                if let Some(active) = self.as_active_thread() {
+                    active.update(cx, |active, cx| {
+                        active.handle_continuation_required(window, cx);
+                    });
+                }
+            }
             AcpThreadEvent::Retry(retry) => {
                 if let Some(active) = self.as_active_thread() {
                     active.update(cx, |active, _cx| {

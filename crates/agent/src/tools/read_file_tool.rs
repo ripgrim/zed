@@ -296,6 +296,7 @@ impl AgentTool for ReadFileTool {
                         position: anchor.unwrap_or_else(|| {
                             text::Anchor::min_for_buffer(buffer.read(cx).remote_id())
                         }),
+                        selection_end: None,
                     }),
                     cx,
                 );

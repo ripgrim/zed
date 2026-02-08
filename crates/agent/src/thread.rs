@@ -1,7 +1,7 @@
 use crate::{
     ContextServerRegistry, CopyPathTool, CreateDirectoryTool, DbLanguageModel, DbThread,
     DeletePathTool, DiagnosticsTool, EditFileTool, FetchTool, FindPathTool, GrepTool,
-    ListDirectoryTool, MovePathTool, NowTool, OpenTool, ProjectSnapshot, ReadFileTool,
+    ListDirectoryTool, MovePathTool, NowTool, OpenTool, PointTool, ProjectSnapshot, ReadFileTool,
     RestoreFileFromDiskTool, SaveFileTool, StreamingEditFileTool, SubagentTool,
     SystemPromptTemplate, Template, Templates, TerminalTool, ThinkingTool, ToolPermissionDecision,
     WebSearchTool, decide_permission_from_settings,
@@ -47,6 +47,7 @@ use settings::{LanguageModelSelection, Settings, ToolPermissionMode, update_sett
 use smol::stream::StreamExt;
 use std::{
     collections::BTreeMap,
+    future::Future,
     ops::RangeInclusive,
     path::Path,
     rc::Rc,
@@ -605,6 +606,7 @@ pub enum ThreadEvent {
     ToolCall(acp::ToolCall),
     ToolCallUpdate(acp_thread::ToolCallUpdate),
     ToolCallAuthorization(ToolCallAuthorization),
+    ToolCallContinuation(ToolCallContinuation),
     Retry(acp_thread::RetryStatus),
     Stop(acp::StopReason),
 }
@@ -761,6 +763,12 @@ pub struct ToolCallAuthorization {
     pub options: acp_thread::PermissionOptions,
     pub response: oneshot::Sender<acp::PermissionOptionId>,
     pub context: Option<ToolPermissionContext>,
+}
+
+#[derive(Debug)]
+pub struct ToolCallContinuation {
+    pub tool_call: acp::ToolCallUpdate,
+    pub response: oneshot::Sender<()>,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -1316,6 +1324,11 @@ impl Thread {
         self.add_tool(MovePathTool::new(self.project.clone()));
         self.add_tool(NowTool);
         self.add_tool(OpenTool::new(self.project.clone()));
+        self.add_tool(PointTool::new(
+            cx.weak_entity(),
+            self.project.clone(),
+            self.action_log.clone(),
+        ));
         self.add_tool(ReadFileTool::new(
             cx.weak_entity(),
             self.project.clone(),
@@ -3110,6 +3123,29 @@ impl ToolCallEventStream {
             .ok();
     }
 
+    /// Pause the tool call until the user presses Enter or clicks Continue.
+    /// Returns a future that resolves when the user continues.
+    pub fn request_continue(&self, title: impl Into<String>) -> impl Future<Output = Result<()>> {
+        let (tx, rx) = oneshot::channel();
+        self.stream
+            .0
+            .unbounded_send(Ok(ThreadEvent::ToolCallContinuation(
+                ToolCallContinuation {
+                    tool_call: acp::ToolCallUpdate::new(
+                        self.tool_use_id.to_string(),
+                        acp::ToolCallUpdateFields::new().title(title.into()),
+                    ),
+                    response: tx,
+                },
+            )))
+            .ok();
+
+        async move {
+            rx.await.map_err(|_| anyhow!("Continuation cancelled"))?;
+            Ok(())
+        }
+    }
+
     /// Authorize a third-party tool (e.g., MCP tool from a context server).
     ///
     /// Unlike built-in tools, third-party tools don't support pattern-based permissions.
@@ -3395,6 +3431,15 @@ impl ToolCallEventStreamReceiver {
             update.terminal
         } else {
             panic!("Expected terminal but got: {:?}", event);
+        }
+    }
+
+    pub async fn expect_continuation(&mut self) -> ToolCallContinuation {
+        let event = self.0.next().await;
+        if let Some(Ok(ThreadEvent::ToolCallContinuation(continuation))) = event {
+            continuation
+        } else {
+            panic!("Expected ToolCallContinuation but got: {:?}", event);
         }
     }
 }
