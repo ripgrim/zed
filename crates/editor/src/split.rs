@@ -333,11 +333,11 @@ impl FeatureFlag for SplitDiffFeatureFlag {
 
 #[derive(Clone, Copy, PartialEq, Eq, Action, Default)]
 #[action(namespace = editor)]
-pub struct SplitDiff;
+pub struct SideBySideDiffView;
 
 #[derive(Clone, Copy, PartialEq, Eq, Action, Default)]
 #[action(namespace = editor)]
-struct UnsplitDiff;
+struct StackedDiffView;
 
 #[derive(Clone, Copy, PartialEq, Eq, Action, Default)]
 #[action(namespace = editor)]
@@ -345,13 +345,13 @@ pub struct ToggleSplitDiff;
 
 #[derive(Clone, Copy, PartialEq, Eq, Action, Default)]
 #[action(namespace = editor)]
-struct JumpToCorrespondingRow;
+struct JumpToCorrespondingPosition;
 
-/// When locked cursors mode is enabled, cursor movements in one editor will
-/// update the cursor position in the other editor to the corresponding row.
+/// When linked cursors mode is enabled, cursor movements in one editor will
+/// update the cursor position in the other editor to the corresponding position.
 #[derive(Clone, Copy, PartialEq, Eq, Action, Default)]
 #[action(namespace = editor)]
-pub struct ToggleLockedCursors;
+pub struct ToggleLinkedCursors;
 
 pub struct SplittableEditor {
     rhs_multibuffer: Entity<MultiBuffer>,
@@ -359,7 +359,7 @@ pub struct SplittableEditor {
     lhs: Option<LhsEditor>,
     workspace: WeakEntity<Workspace>,
     split_state: Entity<SplitEditorState>,
-    locked_cursors: bool,
+    linked_cursors: bool,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -472,12 +472,12 @@ impl SplittableEditor {
             lhs: None,
             workspace: workspace.downgrade(),
             split_state,
-            locked_cursors: false,
+            linked_cursors: true,
             _subscriptions: subscriptions,
         }
     }
 
-    pub fn split(&mut self, _: &SplitDiff, window: &mut Window, cx: &mut Context<Self>) {
+    pub fn split(&mut self, _: &SideBySideDiffView, window: &mut Window, cx: &mut Context<Self>) {
         if !cx.has_flag::<SplitDiffFeatureFlag>() {
             return;
         }
@@ -678,7 +678,7 @@ impl SplittableEditor {
                     let this = this.clone();
                     window.defer(cx, move |window, cx| {
                         this.update(cx, |this, cx| {
-                            if this.locked_cursors {
+                            if this.linked_cursors {
                                 this.sync_cursor_to_other_side(true, cursor_position, window, cx);
                             }
                         })
@@ -694,7 +694,7 @@ impl SplittableEditor {
                     let this = this.clone();
                     window.defer(cx, move |window, cx| {
                         this.update(cx, |this, cx| {
-                            if this.locked_cursors {
+                            if this.linked_cursors {
                                 this.sync_cursor_to_other_side(false, cursor_position, window, cx);
                             }
                         })
@@ -756,18 +756,18 @@ impl SplittableEditor {
         }
     }
 
-    fn toggle_locked_cursors(
+    fn toggle_linked_cursors(
         &mut self,
-        _: &ToggleLockedCursors,
+        _: &ToggleLinkedCursors,
         _window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.locked_cursors = !self.locked_cursors;
+        self.linked_cursors = !self.linked_cursors;
         cx.notify();
     }
 
-    pub fn locked_cursors(&self) -> bool {
-        self.locked_cursors
+    pub fn linked_cursors(&self) -> bool {
+        self.linked_cursors
     }
 
     fn sync_cursor_to_other_side(
@@ -821,9 +821,9 @@ impl SplittableEditor {
 
     fn toggle_split(&mut self, _: &ToggleSplitDiff, window: &mut Window, cx: &mut Context<Self>) {
         if self.lhs.is_some() {
-            self.unsplit(&UnsplitDiff, window, cx);
+            self.unsplit(&StackedDiffView, window, cx);
         } else {
-            self.split(&SplitDiff, window, cx);
+            self.split(&SideBySideDiffView, window, cx);
         }
     }
 
@@ -957,7 +957,7 @@ impl SplittableEditor {
         }
     }
 
-    fn unsplit(&mut self, _: &UnsplitDiff, _: &mut Window, cx: &mut Context<Self>) {
+    fn unsplit(&mut self, _: &StackedDiffView, _: &mut Window, cx: &mut Context<Self>) {
         let Some(lhs) = self.lhs.take() else {
             return;
         };
@@ -1849,7 +1849,7 @@ impl Render for SplittableEditor {
             .on_action(cx.listener(Self::toggle_split))
             .on_action(cx.listener(Self::activate_pane_left))
             .on_action(cx.listener(Self::activate_pane_right))
-            .on_action(cx.listener(Self::toggle_locked_cursors))
+            .on_action(cx.listener(Self::toggle_linked_cursors))
             .on_action(cx.listener(Self::intercept_toggle_code_actions))
             .on_action(cx.listener(Self::intercept_toggle_breakpoint))
             .on_action(cx.listener(Self::intercept_enable_breakpoint))
@@ -2024,7 +2024,7 @@ mod tests {
 
     use crate::SplittableEditor;
     use crate::display_map::{BlockPlacement, BlockProperties, BlockStyle};
-    use crate::split::{SplitDiff, UnsplitDiff};
+    use crate::split::{SideBySideDiffView, StackedDiffView};
     use crate::test::{editor_content_with_blocks_and_width, set_block_content_for_tests};
 
     async fn init_test(
@@ -4400,13 +4400,13 @@ mod tests {
         );
 
         editor.update_in(cx, |splittable_editor, window, cx| {
-            splittable_editor.unsplit(&UnsplitDiff, window, cx);
+            splittable_editor.unsplit(&StackedDiffView, window, cx);
         });
 
         cx.run_until_parked();
 
         editor.update_in(cx, |splittable_editor, window, cx| {
-            splittable_editor.split(&SplitDiff, window, cx);
+            splittable_editor.split(&SideBySideDiffView, window, cx);
         });
 
         cx.run_until_parked();
@@ -4488,7 +4488,7 @@ mod tests {
         cx.run_until_parked();
 
         editor.update_in(cx, |splittable_editor, window, cx| {
-            splittable_editor.unsplit(&UnsplitDiff, window, cx);
+            splittable_editor.unsplit(&StackedDiffView, window, cx);
         });
 
         cx.run_until_parked();
@@ -4550,7 +4550,7 @@ mod tests {
         );
 
         editor.update_in(cx, |splittable_editor, window, cx| {
-            splittable_editor.split(&SplitDiff, window, cx);
+            splittable_editor.split(&SideBySideDiffView, window, cx);
         });
 
         cx.run_until_parked();
@@ -4633,13 +4633,13 @@ mod tests {
         );
 
         editor.update_in(cx, |splittable_editor, window, cx| {
-            splittable_editor.unsplit(&UnsplitDiff, window, cx);
+            splittable_editor.unsplit(&StackedDiffView, window, cx);
         });
 
         cx.run_until_parked();
 
         editor.update_in(cx, |splittable_editor, window, cx| {
-            splittable_editor.split(&SplitDiff, window, cx);
+            splittable_editor.split(&SideBySideDiffView, window, cx);
         });
 
         cx.run_until_parked();

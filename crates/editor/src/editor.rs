@@ -79,7 +79,7 @@ pub use multi_buffer::{
     ToPoint,
 };
 pub use split::{
-    SplitDiff, SplitDiffFeatureFlag, SplittableEditor, ToggleLockedCursors, ToggleSplitDiff,
+    SideBySideDiffView, SplitDiffFeatureFlag, SplittableEditor, ToggleLinkedCursors, ToggleSplitDiff,
 };
 pub use split_editor_view::SplitEditorView;
 pub use text::Bias;
