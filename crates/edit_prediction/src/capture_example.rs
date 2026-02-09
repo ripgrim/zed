@@ -45,6 +45,7 @@ pub fn capture_example(
         .remote_origin_url
         .clone()
         .or_else(|| repository_snapshot.remote_upstream_url.clone())?;
+
     let revision = repository_snapshot.head_commit.as_ref()?.sha.to_string();
 
     let git_store = project.read(cx).git_store().clone();
