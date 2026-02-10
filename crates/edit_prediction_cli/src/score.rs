@@ -113,7 +113,7 @@ pub async fn run_scoring_impl(example: &mut Example) -> anyhow::Result<()> {
             };
 
         let mut best_delta_chr_f = 0.0f32;
-        let mut best_expected_selection: Option<Range<usize>> = None;
+        let mut best_expected_selections: Vec<Range<usize>> = Vec::new();
         let mut best_expected_new_editable_region: Option<String> = None;
         let mut best_patch_idx: Option<usize> = None;
 
@@ -126,12 +126,7 @@ pub async fn run_scoring_impl(example: &mut Example) -> anyhow::Result<()> {
         }
 
         if let Some(idx) = best_patch_idx {
-            let (patch, _) = &expected_patches_with_cursors[idx];
-
-            // todo! use multiple selections
-            let expected_selection_in_patch = expected_patches_with_cursors
-                .get(idx)
-                .and_then(|(_, selections)| selections.first().cloned());
+            let (patch, selections) = &expected_patches_with_cursors[idx];
 
             // For Teacher prompts, we need to apply the patch to the editable region
             // to find where the hunk matched, then compute the expected selection position
@@ -142,18 +137,14 @@ pub async fn run_scoring_impl(example: &mut Example) -> anyhow::Result<()> {
                 {
                     best_expected_new_editable_region = Some(new_editable_region);
 
-                    if let Some(selection_in_patch) = expected_selection_in_patch.clone() {
-                        let hunk_start = hunk_offset.unwrap_or(0);
-                        // Shift the selection range by hunk offset
-                        best_expected_selection = Some(
-                            (hunk_start + selection_in_patch.start)
-                                ..(hunk_start + selection_in_patch.end),
-                        );
-                    }
+                    let hunk_start = hunk_offset.unwrap_or(0);
+                    best_expected_selections = selections
+                        .iter()
+                        .map(|s| (hunk_start + s.start)..(hunk_start + s.end))
+                        .collect();
                 }
-            } else if let Some(selection) = expected_selection_in_patch {
-                // For non-Teacher prompts or if we can't compute, use raw selection
-                best_expected_selection = Some(selection);
+            } else {
+                best_expected_selections = selections.clone();
             }
         }
 
@@ -190,8 +181,8 @@ pub async fn run_scoring_impl(example: &mut Example) -> anyhow::Result<()> {
 
         // Compute cursor/selection position metrics
         let selection_metrics = compute_cursor_metrics(
-            best_expected_selection.clone(),
-            prediction.actual_cursors.first(),
+            &best_expected_selections,
+            &prediction.actual_cursors,
             actual_new_editable_region.as_deref(),
             best_expected_new_editable_region.as_deref(),
         );
@@ -200,10 +191,8 @@ pub async fn run_scoring_impl(example: &mut Example) -> anyhow::Result<()> {
         let wrong_editable_region = Some(!metrics::is_editable_region_correct(&actual_patch));
 
         // Check for isolated whitespace changes.
-        let has_isolated_whitespace_changes = metrics::has_isolated_whitespace_changes(
-            &actual_patch,
-            prediction.actual_cursors.first(),
-        );
+        let has_isolated_whitespace_changes =
+            metrics::has_isolated_whitespace_changes(&actual_patch, &prediction.actual_cursors);
 
         scores.push(ExampleScore {
             delta_chr_f: best_delta_chr_f,
@@ -294,54 +283,57 @@ fn map_selection_through_diff(
 }
 
 fn compute_cursor_metrics(
-    expected_selection: Option<Range<usize>>,
-    actual_cursor: Option<&ActualCursor>,
+    expected_selections: &[Range<usize>],
+    actual_cursors: &[ActualCursor],
     actual_text: Option<&str>,
     expected_text: Option<&str>,
 ) -> SelectionMetrics {
-    let actual_selection = actual_cursor.and_then(|c| c.editable_region_selection());
+    let actual_selections: Vec<Range<usize>> = actual_cursors
+        .iter()
+        .filter_map(|c| c.editable_region_selection())
+        .collect();
 
-    match (&expected_selection, &actual_selection) {
-        (Some(expected), Some(actual)) => {
-            // If we have both texts, map the actual selection through the diff
-            // to normalize for minor text differences (e.g., different placeholder names).
-            let normalized_actual = match (actual_text, expected_text) {
-                (Some(actual_txt), Some(expected_txt)) => {
-                    map_selection_through_diff(actual_txt, expected_txt, actual.clone())
-                }
-                _ => actual.clone(),
-            };
+    if expected_selections.is_empty() && actual_selections.is_empty() {
+        return SelectionMetrics {
+            cursor_distance: None,
+            cursor_exact_match: None,
+            selection_start_distance: None,
+            selection_exact_match: None,
+        };
+    }
 
-            let cursor_distance = expected.end.abs_diff(normalized_actual.end);
-            let start_distance = expected.start.abs_diff(normalized_actual.start);
-            let cursor_exact_match = cursor_distance == 0;
-            let selection_exact_match = cursor_exact_match && start_distance == 0;
+    if expected_selections.len() != actual_selections.len() {
+        return SelectionMetrics {
+            cursor_distance: None,
+            cursor_exact_match: Some(false),
+            selection_start_distance: None,
+            selection_exact_match: Some(false),
+        };
+    }
 
-            SelectionMetrics {
-                cursor_distance: Some(cursor_distance),
-                cursor_exact_match: Some(cursor_exact_match),
-                selection_start_distance: Some(start_distance),
-                selection_exact_match: Some(selection_exact_match),
+    let mut total_cursor_distance = 0usize;
+    let mut total_start_distance = 0usize;
+
+    for (expected, actual) in expected_selections.iter().zip(&actual_selections) {
+        let normalized_actual = match (actual_text, expected_text) {
+            (Some(actual_txt), Some(expected_txt)) => {
+                map_selection_through_diff(actual_txt, expected_txt, actual.clone())
             }
-        }
-        (None, None) => {
-            // Neither has selection - skip scoring
-            SelectionMetrics {
-                cursor_distance: None,
-                cursor_exact_match: None,
-                selection_start_distance: None,
-                selection_exact_match: None,
-            }
-        }
-        (Some(_), None) | (None, Some(_)) => {
-            // Only one has selection - count as miss
-            SelectionMetrics {
-                cursor_distance: None,
-                cursor_exact_match: Some(false),
-                selection_start_distance: None,
-                selection_exact_match: Some(false),
-            }
-        }
+            _ => actual.clone(),
+        };
+
+        total_cursor_distance += expected.end.abs_diff(normalized_actual.end);
+        total_start_distance += expected.start.abs_diff(normalized_actual.start);
+    }
+
+    let cursor_exact_match = total_cursor_distance == 0;
+    let selection_exact_match = cursor_exact_match && total_start_distance == 0;
+
+    SelectionMetrics {
+        cursor_distance: Some(total_cursor_distance),
+        cursor_exact_match: Some(cursor_exact_match),
+        selection_start_distance: Some(total_start_distance),
+        selection_exact_match: Some(selection_exact_match),
     }
 }
 
@@ -848,7 +840,7 @@ mod tests {
         let actual_text = "import module_name\nfrom werkzeug.local import LocalProxy\n";
 
         // Expected selection: "module" at positions 7..13
-        let expected_selection = Some(7..13);
+        let expected_selections = vec![7..13];
 
         // Actual selection: "module_name" at positions 7..18
         let actual_cursor = ActualCursor {
@@ -861,10 +853,9 @@ mod tests {
             selection_start_editable_region_offset: Some(7),
         };
 
-        // Call compute_cursor_metrics with diff normalization enabled
         let metrics = compute_cursor_metrics(
-            expected_selection,
-            Some(&actual_cursor),
+            &expected_selections,
+            &[actual_cursor],
             Some(actual_text),
             Some(expected_text),
         );
@@ -879,5 +870,94 @@ mod tests {
         assert_eq!(metrics.cursor_exact_match, Some(true));
         assert_eq!(metrics.cursor_distance, Some(0));
         assert_eq!(metrics.selection_start_distance, Some(0));
+    }
+
+    #[test]
+    fn test_multiple_selections_all_match() {
+        let expected = vec![5..10, 20..25];
+        let actual_cursors = vec![
+            ActualCursor {
+                path: String::new(),
+                row: 0,
+                column: 0,
+                offset: 0,
+                editable_region_offset: Some(10),
+                selection_start_offset: None,
+                selection_start_editable_region_offset: Some(5),
+            },
+            ActualCursor {
+                path: String::new(),
+                row: 0,
+                column: 0,
+                offset: 0,
+                editable_region_offset: Some(25),
+                selection_start_offset: None,
+                selection_start_editable_region_offset: Some(20),
+            },
+        ];
+
+        let metrics = compute_cursor_metrics(&expected, &actual_cursors, None, None);
+        assert_eq!(metrics.cursor_exact_match, Some(true));
+        assert_eq!(metrics.selection_exact_match, Some(true));
+        assert_eq!(metrics.cursor_distance, Some(0));
+        assert_eq!(metrics.selection_start_distance, Some(0));
+    }
+
+    #[test]
+    fn test_multiple_selections_partial_mismatch() {
+        let expected = vec![5..10, 20..25];
+        let actual_cursors = vec![
+            ActualCursor {
+                path: String::new(),
+                row: 0,
+                column: 0,
+                offset: 0,
+                editable_region_offset: Some(10),
+                selection_start_offset: None,
+                selection_start_editable_region_offset: Some(5),
+            },
+            ActualCursor {
+                path: String::new(),
+                row: 0,
+                column: 0,
+                offset: 0,
+                editable_region_offset: Some(27),
+                selection_start_offset: None,
+                selection_start_editable_region_offset: Some(21),
+            },
+        ];
+
+        let metrics = compute_cursor_metrics(&expected, &actual_cursors, None, None);
+        assert_eq!(metrics.cursor_exact_match, Some(false));
+        assert_eq!(metrics.selection_exact_match, Some(false));
+        assert_eq!(metrics.cursor_distance, Some(2));
+        assert_eq!(metrics.selection_start_distance, Some(1));
+    }
+
+    #[test]
+    fn test_selection_count_mismatch_is_miss() {
+        let expected = vec![5..10, 20..25];
+        let actual_cursors = vec![ActualCursor {
+            path: String::new(),
+            row: 0,
+            column: 0,
+            offset: 0,
+            editable_region_offset: Some(10),
+            selection_start_offset: None,
+            selection_start_editable_region_offset: Some(5),
+        }];
+
+        let metrics = compute_cursor_metrics(&expected, &actual_cursors, None, None);
+        assert_eq!(metrics.cursor_exact_match, Some(false));
+        assert_eq!(metrics.selection_exact_match, Some(false));
+        assert_eq!(metrics.cursor_distance, None);
+        assert_eq!(metrics.selection_start_distance, None);
+    }
+
+    #[test]
+    fn test_both_empty_skips_scoring() {
+        let metrics = compute_cursor_metrics(&[], &[], None, None);
+        assert_eq!(metrics.cursor_exact_match, None);
+        assert_eq!(metrics.selection_exact_match, None);
     }
 }

@@ -392,10 +392,10 @@ pub fn exact_lines_match(expected_patch: &str, actual_patch: &str) -> Classifica
 /// A whitespace-only change is an added or deleted line whose content is empty or
 /// contains only whitespace. It is "isolated" when it is not adjacent to any
 /// substantive (non-whitespace) change within the same contiguous change group.
-pub fn has_isolated_whitespace_changes(patch_str: &str, cursor: Option<&ActualCursor>) -> bool {
+pub fn has_isolated_whitespace_changes(patch_str: &str, cursors: &[ActualCursor]) -> bool {
     let patch = Patch::parse_unified_diff(patch_str);
 
-    let cursor_new_file_line = cursor.as_ref().map(|c| (c.row + 1) as usize);
+    let cursor_new_file_lines: Vec<usize> = cursors.iter().map(|c| (c.row + 1) as usize).collect();
 
     for hunk in &patch.hunks {
         let lines = &hunk.lines;
@@ -406,7 +406,7 @@ pub fn has_isolated_whitespace_changes(patch_str: &str, cursor: Option<&ActualCu
                 PatchLine::Addition(s) => {
                     let addition_line = new_text_line;
                     new_text_line += 1;
-                    if s.trim().is_empty() && cursor_new_file_line == Some(addition_line) {
+                    if s.trim().is_empty() && cursor_new_file_lines.contains(&addition_line) {
                         continue;
                     }
                     s.as_str()
@@ -873,7 +873,7 @@ index abc123..def456 100644
                  println!(\"hello\");
              }
         "};
-        assert!(has_isolated_whitespace_changes(patch, None));
+        assert!(has_isolated_whitespace_changes(patch, &[]));
     }
 
     #[test]
@@ -886,7 +886,7 @@ index abc123..def456 100644
                  println!(\"hello\");
              }
         "};
-        assert!(!has_isolated_whitespace_changes(patch, None));
+        assert!(!has_isolated_whitespace_changes(patch, &[]));
     }
 
     #[test]
@@ -898,7 +898,7 @@ index abc123..def456 100644
             +    println!(\"world\");
              }
         "};
-        assert!(!has_isolated_whitespace_changes(patch, None));
+        assert!(!has_isolated_whitespace_changes(patch, &[]));
     }
 
     #[test]
@@ -910,7 +910,7 @@ index abc123..def456 100644
                  println!(\"hello\");
              }
         "};
-        assert!(has_isolated_whitespace_changes(patch, None));
+        assert!(has_isolated_whitespace_changes(patch, &[]));
     }
 
     #[test]
@@ -927,13 +927,13 @@ index abc123..def456 100644
                  println!(\"hello\");
              }
         "};
-        assert!(has_isolated_whitespace_changes(patch, None));
+        assert!(has_isolated_whitespace_changes(patch, &[]));
     }
 
     #[test]
     fn test_isolated_whitespace_empty_patch() {
         let patch = "";
-        assert!(!has_isolated_whitespace_changes(patch, None));
+        assert!(!has_isolated_whitespace_changes(patch, &[]));
     }
 
     #[test]
@@ -949,7 +949,7 @@ index abc123..def456 100644
         "};
         // New-file line 2 is the added blank line
         let cursor = cursor_on_line(2);
-        assert!(!has_isolated_whitespace_changes(patch, Some(&cursor)));
+        assert!(!has_isolated_whitespace_changes(patch, &[cursor]));
     }
 
     #[test]
@@ -963,7 +963,7 @@ index abc123..def456 100644
              }
         "};
         let cursor = cursor_on_line(1);
-        assert!(has_isolated_whitespace_changes(patch, Some(&cursor)));
+        assert!(has_isolated_whitespace_changes(patch, &[cursor]));
     }
 
     #[test]
@@ -977,6 +977,6 @@ index abc123..def456 100644
              }
         "};
         let cursor = cursor_on_line(2);
-        assert!(has_isolated_whitespace_changes(patch, Some(&cursor)));
+        assert!(has_isolated_whitespace_changes(patch, &[cursor]));
     }
 }
