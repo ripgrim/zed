@@ -529,6 +529,12 @@ impl Platform for HeadlessMetalPlatform {
     fn delete_credentials(&self, _url: &str) -> Task<Result<()>> {
         Task::ready(Ok(()))
     }
+
+    fn thermal_state(&self) -> super::ThermalState {
+        super::ThermalState::Nominal
+    }
+
+    fn on_thermal_state_change(&self, _: Box<dyn FnMut()>) {}
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
