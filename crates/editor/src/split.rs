@@ -378,14 +378,14 @@ pub struct ToggleDiffView;
 pub struct SplittableEditor {
     rhs_multibuffer: Entity<MultiBuffer>,
     rhs_editor: Entity<Editor>,
-    lhs: Option<LhsEditor>,
+    lhs_multibuffer: Entity<MultiBuffer>,
+    lhs_editor: Option<LhsEditor>,
     workspace: WeakEntity<Workspace>,
     split_state: Entity<SplitEditorState>,
     _subscriptions: Vec<Subscription>,
 }
 
 struct LhsEditor {
-    multibuffer: Entity<MultiBuffer>,
     editor: Entity<Editor>,
     was_last_focused: bool,
     _subscriptions: Vec<Subscription>,
@@ -397,11 +397,15 @@ impl SplittableEditor {
     }
 
     pub fn lhs_editor(&self) -> Option<&Entity<Editor>> {
-        self.lhs.as_ref().map(|s| &s.editor)
+        self.lhs_editor.as_ref().map(|lhs| &lhs.editor)
+    }
+
+    pub fn lhs_multibuffer(&self) -> &Entity<MultiBuffer> {
+        &self.lhs_multibuffer
     }
 
     pub fn is_split(&self) -> bool {
-        self.lhs.is_some()
+        self.lhs_editor.is_some()
     }
 
     pub fn set_render_diff_hunk_controls(
@@ -413,7 +417,7 @@ impl SplittableEditor {
             editor.set_render_diff_hunk_controls(render_diff_hunk_controls.clone(), cx);
         });
 
-        if let Some(lhs) = &self.lhs {
+        if let Some(lhs) = &self.lhs_editor {
             lhs.editor.update(cx, |editor, cx| {
                 editor.set_render_diff_hunk_controls(render_diff_hunk_controls.clone(), cx);
             });
@@ -421,7 +425,7 @@ impl SplittableEditor {
     }
 
     pub fn last_selected_editor(&self) -> &Entity<Editor> {
-        if let Some(lhs) = &self.lhs
+        if let Some(lhs) = &self.lhs_editor
             && lhs.was_last_focused
         {
             &lhs.editor
@@ -464,6 +468,12 @@ impl SplittableEditor {
             }),
         ];
 
+        let lhs_multibuffer = cx.new(|cx| {
+            let mut multibuffer = MultiBuffer::new(Capability::ReadOnly);
+            multibuffer.set_all_diff_hunks_expanded(cx);
+            multibuffer
+        });
+
         let this = cx.weak_entity();
         window.defer(cx, {
             let workspace = workspace.downgrade();
@@ -490,7 +500,8 @@ impl SplittableEditor {
         Self {
             rhs_editor,
             rhs_multibuffer,
-            lhs: None,
+            lhs_multibuffer,
+            lhs_editor: None,
             workspace: workspace.downgrade(),
             split_state,
             _subscriptions: subscriptions,
@@ -501,7 +512,7 @@ impl SplittableEditor {
         if !cx.has_flag::<SplitDiffFeatureFlag>() {
             return;
         }
-        if self.lhs.is_some() {
+        if self.lhs_editor.is_some() {
             return;
         }
         let Some(workspace) = self.workspace.upgrade() else {
@@ -509,11 +520,7 @@ impl SplittableEditor {
         };
         let project = workspace.read(cx).project().clone();
 
-        let lhs_multibuffer = cx.new(|cx| {
-            let mut multibuffer = MultiBuffer::new(Capability::ReadOnly);
-            multibuffer.set_all_diff_hunks_expanded(cx);
-            multibuffer
-        });
+        let lhs_multibuffer = self.lhs_multibuffer.clone();
 
         let render_diff_hunk_controls = self.rhs_editor.read(cx).render_diff_hunk_controls.clone();
         let lhs_editor = cx.new(|cx| {
@@ -541,7 +548,7 @@ impl SplittableEditor {
                     lines,
                     direction,
                 } => {
-                    if this.lhs.is_some() {
+                    if this.lhs_editor.is_some() {
                         let rhs_display_map = this.rhs_editor.read(cx).display_map.read(cx);
                         let rhs_ids: Vec<_> = excerpt_ids
                             .iter()
@@ -553,7 +560,7 @@ impl SplittableEditor {
                     }
                 }
                 EditorEvent::StageOrUnstageRequested { stage, hunks } => {
-                    if this.lhs.is_some() {
+                    if this.lhs_editor.is_some() {
                         let translated = translate_lhs_hunks_to_rhs(hunks, this, cx);
                         if !translated.is_empty() {
                             let stage = *stage;
@@ -567,7 +574,7 @@ impl SplittableEditor {
                     }
                 }
                 EditorEvent::RestoreRequested { hunks } => {
-                    if this.lhs.is_some() {
+                    if this.lhs_editor.is_some() {
                         let translated = translate_lhs_hunks_to_rhs(hunks, this, cx);
                         if !translated.is_empty() {
                             this.rhs_editor.update(cx, |editor, cx| {
@@ -580,7 +587,7 @@ impl SplittableEditor {
                     selections_by_buffer,
                     split,
                 } => {
-                    if this.lhs.is_some() {
+                    if this.lhs_editor.is_some() {
                         let translated =
                             translate_lhs_selections_to_rhs(selections_by_buffer, this, cx);
                         if !translated.is_empty() {
@@ -599,7 +606,7 @@ impl SplittableEditor {
         let lhs_focus_handle = lhs_editor.read(cx).focus_handle(cx);
         subscriptions.push(
             cx.on_focus_in(&lhs_focus_handle, window, |this, _window, cx| {
-                if let Some(lhs) = &mut this.lhs {
+                if let Some(lhs) = &mut this.lhs_editor {
                     if !lhs.was_last_focused {
                         lhs.was_last_focused = true;
                         cx.emit(SearchEvent::MatchesInvalidated);
@@ -612,7 +619,7 @@ impl SplittableEditor {
         let rhs_focus_handle = self.rhs_editor.read(cx).focus_handle(cx);
         subscriptions.push(
             cx.on_focus_in(&rhs_focus_handle, window, |this, _window, cx| {
-                if let Some(lhs) = &mut this.lhs {
+                if let Some(lhs) = &mut this.lhs_editor {
                     if lhs.was_last_focused {
                         lhs.was_last_focused = false;
                         cx.emit(SearchEvent::MatchesInvalidated);
@@ -624,7 +631,6 @@ impl SplittableEditor {
 
         let lhs = LhsEditor {
             editor: lhs_editor,
-            multibuffer: lhs_multibuffer,
             was_last_focused: false,
             _subscriptions: subscriptions,
         };
@@ -663,7 +669,7 @@ impl SplittableEditor {
         // stream this
         for (path, diff) in path_diffs {
             self.rhs_multibuffer.update(cx, |rhs_multibuffer, cx| {
-                lhs.multibuffer.update(cx, |lhs_multibuffer, lhs_cx| {
+                self.lhs_multibuffer.update(cx, |lhs_multibuffer, lhs_cx| {
                     for (lhs, rhs) in LhsEditor::update_path_excerpts_from_rhs(
                         path.clone(),
                         rhs_multibuffer,
@@ -735,7 +741,7 @@ impl SplittableEditor {
             cx.notify();
         });
 
-        self.lhs = Some(lhs);
+        self.lhs_editor = Some(lhs);
 
         cx.notify();
     }
@@ -746,7 +752,7 @@ impl SplittableEditor {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if let Some(lhs) = &self.lhs {
+        if let Some(lhs) = &self.lhs_editor {
             if !lhs.was_last_focused {
                 lhs.editor.read(cx).focus_handle(cx).focus(window, cx);
                 lhs.editor.update(cx, |editor, cx| {
@@ -766,7 +772,7 @@ impl SplittableEditor {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if let Some(lhs) = &self.lhs {
+        if let Some(lhs) = &self.lhs_editor {
             if lhs.was_last_focused {
                 self.rhs_editor.read(cx).focus_handle(cx).focus(window, cx);
                 self.rhs_editor.update(cx, |editor, cx| {
@@ -787,7 +793,7 @@ impl SplittableEditor {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let Some(lhs) = &self.lhs else {
+        let Some(lhs) = &self.lhs_editor else {
             return;
         };
 
@@ -816,7 +822,7 @@ impl SplittableEditor {
     }
 
     fn toggle_split(&mut self, _: &ToggleDiffView, window: &mut Window, cx: &mut Context<Self>) {
-        if self.lhs.is_some() {
+        if self.lhs_editor.is_some() {
             self.unsplit(window, cx);
         } else {
             self.split(window, cx);
@@ -829,8 +835,7 @@ impl SplittableEditor {
         _window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        // Only block breakpoint actions when the left (lhs) editor has focus
-        if let Some(lhs) = &self.lhs {
+        if let Some(lhs) = &self.lhs_editor {
             if lhs.was_last_focused {
                 cx.stop_propagation();
             } else {
@@ -847,8 +852,7 @@ impl SplittableEditor {
         _window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        // Only block breakpoint actions when the left (lhs) editor has focus
-        if let Some(lhs) = &self.lhs {
+        if let Some(lhs) = &self.lhs_editor {
             if lhs.was_last_focused {
                 cx.stop_propagation();
             } else {
@@ -865,8 +869,7 @@ impl SplittableEditor {
         _window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        // Only block breakpoint actions when the left (lhs) editor has focus
-        if let Some(lhs) = &self.lhs {
+        if let Some(lhs) = &self.lhs_editor {
             if lhs.was_last_focused {
                 cx.stop_propagation();
             } else {
@@ -883,8 +886,7 @@ impl SplittableEditor {
         _window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        // Only block breakpoint actions when the left (lhs) editor has focus
-        if let Some(lhs) = &self.lhs {
+        if let Some(lhs) = &self.lhs_editor {
             if lhs.was_last_focused {
                 cx.stop_propagation();
             } else {
@@ -901,7 +903,7 @@ impl SplittableEditor {
         _window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if self.lhs.is_some() {
+        if self.lhs_editor.is_some() {
             cx.stop_propagation();
         } else {
             cx.propagate();
@@ -914,7 +916,7 @@ impl SplittableEditor {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if let Some(lhs) = &self.lhs {
+        if let Some(lhs) = &self.lhs_editor {
             cx.stop_propagation();
 
             let is_lhs_focused = lhs.was_last_focused;
@@ -924,12 +926,10 @@ impl SplittableEditor {
                 (&self.rhs_editor, &lhs.editor)
             };
 
-            // Toggle the focused editor
             focused_editor.update(cx, |editor, cx| {
                 editor.toggle_soft_wrap(&ToggleSoftWrap, window, cx);
             });
 
-            // Copy the soft wrap state from the focused editor to the other editor
             let soft_wrap_override = focused_editor.read(cx).soft_wrap_mode_override;
             other_editor.update(cx, |editor, cx| {
                 editor.soft_wrap_mode_override = soft_wrap_override;
@@ -941,7 +941,7 @@ impl SplittableEditor {
     }
 
     fn unsplit(&mut self, _: &mut Window, cx: &mut Context<Self>) {
-        let Some(lhs) = self.lhs.take() else {
+        let Some(lhs) = self.lhs_editor.take() else {
             return;
         };
         self.rhs_editor.update(cx, |rhs, cx| {
@@ -981,7 +981,8 @@ impl SplittableEditor {
         cx: &mut Context<Self>,
     ) -> (Vec<Range<Anchor>>, bool) {
         let rhs_display_map = self.rhs_editor.read(cx).display_map.clone();
-        let lhs = &mut self.lhs;
+        let lhs_multibuffer = self.lhs_multibuffer.clone();
+        let has_lhs_editor = self.lhs_editor.is_some();
         let (anchors, added_a_new_excerpt) =
             self.rhs_multibuffer.update(cx, |rhs_multibuffer, cx| {
                 let (anchors, added_a_new_excerpt) = rhs_multibuffer.set_excerpts_for_path(
@@ -999,18 +1000,16 @@ impl SplittableEditor {
                     rhs_multibuffer.add_diff(diff.clone(), cx);
                 }
 
-                if let Some(lhs) = lhs {
-                    lhs.multibuffer.update(cx, |lhs_multibuffer, lhs_cx| {
-                        LhsEditor::sync_path_excerpts(
-                            path,
-                            rhs_multibuffer,
-                            lhs_multibuffer,
-                            diff,
-                            &rhs_display_map,
-                            lhs_cx,
-                        )
-                    })
-                }
+                lhs_multibuffer.update(cx, |lhs_multibuffer, lhs_cx| {
+                    LhsEditor::sync_path_excerpts(
+                        path,
+                        rhs_multibuffer,
+                        lhs_multibuffer,
+                        diff,
+                        has_lhs_editor.then_some(&rhs_display_map),
+                        lhs_cx,
+                    )
+                });
 
                 (anchors, added_a_new_excerpt)
             });
@@ -1026,46 +1025,46 @@ impl SplittableEditor {
         cx: &mut Context<Self>,
     ) {
         let rhs_display_map = self.rhs_editor.read(cx).display_map.clone();
+        let lhs_multibuffer = self.lhs_multibuffer.clone();
+        let has_lhs_editor = self.lhs_editor.is_some();
 
-        let lhs = &mut self.lhs;
-        let lhs_multibuffer = lhs.as_ref().map(|l| l.multibuffer.clone());
         self.rhs_multibuffer.update(cx, |rhs_multibuffer, cx| {
-            if let Some(lhs_multibuffer) = lhs_multibuffer {
-                let snapshot = rhs_multibuffer.snapshot(cx);
-                let affected_paths: HashMap<_, _> = excerpt_ids
-                    .clone()
-                    .map(|excerpt_id| {
-                        let path = rhs_multibuffer.path_for_excerpt(excerpt_id).unwrap();
-                        let buffer = snapshot.buffer_for_excerpt(excerpt_id).unwrap();
-                        let diff = rhs_multibuffer.diff_for(buffer.remote_id()).unwrap();
-                        (path, diff)
-                    })
-                    .collect();
-                rhs_multibuffer.expand_excerpts(excerpt_ids.clone(), lines, direction, cx);
-                for (path, diff) in affected_paths {
-                    lhs_multibuffer.update(cx, |lhs_multibuffer, lhs_cx| {
-                        LhsEditor::sync_path_excerpts(
-                            path,
-                            rhs_multibuffer,
-                            lhs_multibuffer,
-                            diff,
-                            &rhs_display_map,
-                            lhs_cx,
-                        );
-                    });
-                }
-            } else {
-                rhs_multibuffer.expand_excerpts(excerpt_ids.clone(), lines, direction, cx);
-            };
+            let snapshot = rhs_multibuffer.snapshot(cx);
+            let affected_paths: HashMap<_, _> = excerpt_ids
+                .clone()
+                .map(|excerpt_id| {
+                    let path = rhs_multibuffer.path_for_excerpt(excerpt_id).unwrap();
+                    let buffer = snapshot.buffer_for_excerpt(excerpt_id).unwrap();
+                    let diff = rhs_multibuffer.diff_for(buffer.remote_id()).unwrap();
+                    (path, diff)
+                })
+                .collect();
+
+            rhs_multibuffer.expand_excerpts(excerpt_ids.clone(), lines, direction, cx);
+
+            for (path, diff) in affected_paths {
+                lhs_multibuffer.update(cx, |lhs_multibuffer, lhs_cx| {
+                    LhsEditor::sync_path_excerpts(
+                        path,
+                        rhs_multibuffer,
+                        lhs_multibuffer,
+                        diff,
+                        has_lhs_editor.then_some(&rhs_display_map),
+                        lhs_cx,
+                    );
+                });
+            }
         });
     }
 
     pub fn remove_excerpts_for_path(&mut self, path: PathKey, cx: &mut Context<Self>) {
         let rhs_display_map = self.rhs_editor.read(cx).display_map.clone();
+        let lhs_multibuffer = self.lhs_multibuffer.clone();
+        let has_lhs_editor = self.lhs_editor.is_some();
 
-        if let Some(lhs) = &self.lhs {
-            self.rhs_multibuffer.update(cx, |rhs_multibuffer, cx| {
-                lhs.multibuffer.update(cx, |lhs_multibuffer, cx| {
+        self.rhs_multibuffer.update(cx, |rhs_multibuffer, cx| {
+            if has_lhs_editor {
+                lhs_multibuffer.update(cx, |lhs_multibuffer, cx| {
                     LhsEditor::remove_mappings_for_path(
                         &path,
                         rhs_multibuffer,
@@ -1074,16 +1073,13 @@ impl SplittableEditor {
                         cx,
                     );
                 });
-                rhs_multibuffer.remove_excerpts_for_path(path.clone(), cx);
-            });
-            lhs.multibuffer.update(cx, |lhs_multibuffer, cx| {
-                lhs_multibuffer.remove_excerpts_for_path(path, cx);
-            });
-        } else {
-            self.rhs_multibuffer.update(cx, |rhs_multibuffer, cx| {
-                rhs_multibuffer.remove_excerpts_for_path(path.clone(), cx);
-            });
-        }
+            }
+            rhs_multibuffer.remove_excerpts_for_path(path.clone(), cx);
+        });
+
+        lhs_multibuffer.update(cx, |lhs_multibuffer, cx| {
+            lhs_multibuffer.remove_excerpts_for_path(path, cx);
+        });
     }
 }
 
@@ -1098,9 +1094,9 @@ impl SplittableEditor {
 
         self.debug_print(cx);
 
-        let lhs = self.lhs.as_ref().unwrap();
+        let lhs_editor = self.lhs_editor.as_ref().unwrap();
         let rhs_excerpts = self.rhs_multibuffer.read(cx).excerpt_ids();
-        let lhs_excerpts = lhs.multibuffer.read(cx).excerpt_ids();
+        let lhs_excerpts = self.lhs_multibuffer.read(cx).excerpt_ids();
         assert_eq!(
             lhs_excerpts.len(),
             rhs_excerpts.len(),
@@ -1108,7 +1104,7 @@ impl SplittableEditor {
         );
 
         if quiesced {
-            let rhs_snapshot = lhs
+            let rhs_snapshot = lhs_editor
                 .editor
                 .update(cx, |editor, cx| editor.display_snapshot(cx));
             let lhs_snapshot = self
@@ -1195,7 +1191,7 @@ impl SplittableEditor {
         cx: &mut App,
         mut extract: impl FnMut(&crate::DisplaySnapshot) -> T,
     ) {
-        let lhs = self.lhs.as_ref().expect("requires split");
+        let lhs = self.lhs_editor.as_ref().expect("requires split");
         let rhs_snapshot = self.rhs_editor.update(cx, |editor, cx| {
             editor.display_map.update(cx, |map, cx| map.snapshot(cx))
         });
@@ -1218,11 +1214,11 @@ impl SplittableEditor {
         use buffer_diff::DiffHunkStatusKind;
 
         assert!(
-            self.lhs.is_some(),
+            self.lhs_editor.is_some(),
             "debug_print is only useful when lhs editor exists"
         );
 
-        let lhs = self.lhs.as_ref().unwrap();
+        let lhs = self.lhs_editor.as_ref().unwrap();
 
         // Get terminal width, default to 80 if unavailable
         let terminal_width = std::env::var("COLUMNS")
@@ -1685,9 +1681,9 @@ impl Item for SplittableEditor {
         self.rhs_editor.update(cx, |rhs_editor, cx| {
             rhs_editor.added_to_workspace(workspace, window, cx);
         });
-        if let Some(lhs) = &self.lhs {
-            lhs.editor.update(cx, |lhs_editor, cx| {
-                lhs_editor.added_to_workspace(workspace, window, cx);
+        if let Some(lhs) = &self.lhs_editor {
+            lhs.editor.update(cx, |editor, cx| {
+                editor.added_to_workspace(workspace, window, cx);
             });
         }
     }
@@ -1825,7 +1821,7 @@ impl Render for SplittableEditor {
         _window: &mut ui::Window,
         cx: &mut ui::Context<Self>,
     ) -> impl ui::IntoElement {
-        let inner = if self.lhs.is_some() {
+        let inner = if self.lhs_editor.is_some() {
             let style = self.rhs_editor.read(cx).create_style(cx);
             SplitEditorView::new(cx.entity(), style, self.split_state.clone()).into_any_element()
         } else {
@@ -1924,16 +1920,18 @@ impl LhsEditor {
         rhs_multibuffer: &MultiBuffer,
         lhs_multibuffer: &mut MultiBuffer,
         diff: Entity<BufferDiff>,
-        rhs_display_map: &Entity<DisplayMap>,
+        rhs_display_map: Option<&Entity<DisplayMap>>,
         lhs_cx: &mut Context<MultiBuffer>,
     ) {
-        Self::remove_mappings_for_path(
-            &path_key,
-            rhs_multibuffer,
-            lhs_multibuffer,
-            rhs_display_map,
-            lhs_cx,
-        );
+        if let Some(rhs_display_map) = rhs_display_map {
+            Self::remove_mappings_for_path(
+                &path_key,
+                rhs_multibuffer,
+                lhs_multibuffer,
+                rhs_display_map,
+                lhs_cx,
+            );
+        }
 
         let mappings = Self::update_path_excerpts_from_rhs(
             path_key,
@@ -1943,16 +1941,18 @@ impl LhsEditor {
             lhs_cx,
         );
 
-        let lhs_buffer_id = diff.read(lhs_cx).base_text(lhs_cx).remote_id();
-        let rhs_buffer_id = diff.read(lhs_cx).buffer_id;
+        if let Some(rhs_display_map) = rhs_display_map {
+            let lhs_buffer_id = diff.read(lhs_cx).base_text(lhs_cx).remote_id();
+            let rhs_buffer_id = diff.read(lhs_cx).buffer_id;
 
-        if let Some(companion) = rhs_display_map.read(lhs_cx).companion().cloned() {
-            companion.update(lhs_cx, |c, _| {
-                for (lhs, rhs) in mappings {
-                    c.add_excerpt_mapping(lhs, rhs);
-                }
-                c.add_buffer_mapping(lhs_buffer_id, rhs_buffer_id);
-            });
+            if let Some(companion) = rhs_display_map.read(lhs_cx).companion().cloned() {
+                companion.update(lhs_cx, |c, _| {
+                    for (lhs, rhs) in mappings {
+                        c.add_excerpt_mapping(lhs, rhs);
+                    }
+                    c.add_buffer_mapping(lhs_buffer_id, rhs_buffer_id);
+                });
+            }
         }
     }
 
@@ -2028,7 +2028,7 @@ mod tests {
             editor.rhs_editor.update(cx, |editor, cx| {
                 editor.set_soft_wrap_mode(soft_wrap, cx);
             });
-            if let Some(lhs) = &editor.lhs {
+            if let Some(lhs) = &editor.lhs_editor {
                 lhs.editor.update(cx, |editor, cx| {
                     editor.set_soft_wrap_mode(soft_wrap, cx);
                 });
@@ -2077,7 +2077,7 @@ mod tests {
         cx: &mut VisualTestContext,
     ) {
         let (rhs_editor, lhs_editor) = editor.update(cx, |editor, _cx| {
-            let lhs = editor.lhs.as_ref().expect("should have lhs editor");
+            let lhs = editor.lhs_editor.as_ref().expect("should have lhs editor");
             (editor.rhs_editor.clone(), lhs.editor.clone())
         });
 
@@ -3868,7 +3868,7 @@ mod tests {
         cx.run_until_parked();
 
         let (rhs_editor, lhs_editor) = editor.update(cx, |editor, _cx| {
-            let lhs = editor.lhs.as_ref().expect("should have lhs editor");
+            let lhs = editor.lhs_editor.as_ref().expect("should have lhs editor");
             (editor.rhs_editor.clone(), lhs.editor.clone())
         });
 
@@ -4126,8 +4126,9 @@ mod tests {
         });
 
         let rhs_editor = editor.read_with(cx, |editor, _| editor.rhs_editor.clone());
-        let lhs_editor =
-            editor.read_with(cx, |editor, _| editor.lhs.as_ref().unwrap().editor.clone());
+        let lhs_editor = editor.read_with(cx, |editor, _| {
+            editor.lhs_editor.as_ref().unwrap().editor.clone()
+        });
 
         cx.update(|_, cx| {
             set_block_content_for_tests(&rhs_editor, block_ids[0], cx, |_| {
@@ -4283,8 +4284,9 @@ mod tests {
         });
 
         let rhs_editor = editor.read_with(cx, |editor, _| editor.rhs_editor.clone());
-        let lhs_editor =
-            editor.read_with(cx, |editor, _| editor.lhs.as_ref().unwrap().editor.clone());
+        let lhs_editor = editor.read_with(cx, |editor, _| {
+            editor.lhs_editor.as_ref().unwrap().editor.clone()
+        });
 
         cx.update(|_, cx| {
             set_block_content_for_tests(&rhs_editor, block_ids[0], cx, |_| {
@@ -4381,8 +4383,9 @@ mod tests {
 
         cx.run_until_parked();
 
-        let lhs_editor =
-            editor.read_with(cx, |editor, _| editor.lhs.as_ref().unwrap().editor.clone());
+        let lhs_editor = editor.read_with(cx, |editor, _| {
+            editor.lhs_editor.as_ref().unwrap().editor.clone()
+        });
 
         let lhs_block_id_2 = lhs_editor.read_with(cx, |lhs_editor, cx| {
             let display_map = lhs_editor.display_map.read(cx);
@@ -4525,8 +4528,9 @@ mod tests {
 
         cx.run_until_parked();
 
-        let lhs_editor =
-            editor.read_with(cx, |editor, _| editor.lhs.as_ref().unwrap().editor.clone());
+        let lhs_editor = editor.read_with(cx, |editor, _| {
+            editor.lhs_editor.as_ref().unwrap().editor.clone()
+        });
 
         let (lhs_block_id_1, lhs_block_id_2) = lhs_editor.read_with(cx, |lhs_editor, cx| {
             let display_map = lhs_editor.display_map.read(cx);
@@ -4614,8 +4618,9 @@ mod tests {
 
         cx.run_until_parked();
 
-        let lhs_editor =
-            editor.read_with(cx, |editor, _| editor.lhs.as_ref().unwrap().editor.clone());
+        let lhs_editor = editor.read_with(cx, |editor, _| {
+            editor.lhs_editor.as_ref().unwrap().editor.clone()
+        });
 
         let lhs_block_id_2 = lhs_editor.read_with(cx, |lhs_editor, cx| {
             let display_map = lhs_editor.display_map.read(cx);
@@ -4830,7 +4835,7 @@ mod tests {
         let (rhs_editor, lhs_editor) = editor.read_with(cx, |editor, _cx| {
             (
                 editor.rhs_editor.clone(),
-                editor.lhs.as_ref().unwrap().editor.clone(),
+                editor.lhs_editor.as_ref().unwrap().editor.clone(),
             )
         });
 
@@ -5003,8 +5008,9 @@ mod tests {
         });
 
         let rhs_editor = editor.read_with(cx, |editor, _| editor.rhs_editor.clone());
-        let lhs_editor =
-            editor.read_with(cx, |editor, _| editor.lhs.as_ref().unwrap().editor.clone());
+        let lhs_editor = editor.read_with(cx, |editor, _| {
+            editor.lhs_editor.as_ref().unwrap().editor.clone()
+        });
 
         cx.update(|_, cx| {
             set_block_content_for_tests(&rhs_editor, block_ids[0], cx, |_| {
@@ -5164,8 +5170,9 @@ mod tests {
         });
 
         let rhs_editor = editor.read_with(cx, |editor, _| editor.rhs_editor.clone());
-        let lhs_editor =
-            editor.read_with(cx, |editor, _| editor.lhs.as_ref().unwrap().editor.clone());
+        let lhs_editor = editor.read_with(cx, |editor, _| {
+            editor.lhs_editor.as_ref().unwrap().editor.clone()
+        });
 
         cx.update(|_, cx| {
             set_block_content_for_tests(&rhs_editor, block_ids[0], cx, |_| {
@@ -5300,8 +5307,9 @@ mod tests {
         });
 
         let rhs_editor = editor.read_with(cx, |editor, _| editor.rhs_editor.clone());
-        let lhs_editor =
-            editor.read_with(cx, |editor, _| editor.lhs.as_ref().unwrap().editor.clone());
+        let lhs_editor = editor.read_with(cx, |editor, _| {
+            editor.lhs_editor.as_ref().unwrap().editor.clone()
+        });
 
         let lhs_block_id = lhs_editor.read_with(cx, |lhs_editor, cx| {
             let display_map = lhs_editor.display_map.read(cx);
