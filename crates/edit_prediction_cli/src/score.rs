@@ -191,7 +191,7 @@ pub async fn run_scoring_impl(example: &mut Example) -> anyhow::Result<()> {
         // Compute cursor/selection position metrics
         let selection_metrics = compute_cursor_metrics(
             best_expected_selection.clone(),
-            prediction.actual_cursor.as_ref(),
+            prediction.actual_cursors.first(),
             actual_new_editable_region.as_deref(),
             best_expected_new_editable_region.as_deref(),
         );
@@ -202,7 +202,7 @@ pub async fn run_scoring_impl(example: &mut Example) -> anyhow::Result<()> {
         // Check for isolated whitespace changes.
         let has_isolated_whitespace_changes = metrics::has_isolated_whitespace_changes(
             &actual_patch,
-            prediction.actual_cursor.as_ref(),
+            prediction.actual_cursors.first(),
         );
 
         scores.push(ExampleScore {

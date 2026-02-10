@@ -245,7 +245,7 @@ pub fn parse(example: &Example, actual_output: &str) -> Result<(String, Vec<Actu
             .first()
             .context("no original prediction to keep")?;
         let patch = original.actual_patch.clone().unwrap_or_default();
-        let cursors: Vec<ActualCursor> = original.actual_cursor.clone().into_iter().collect();
+        let cursors: Vec<ActualCursor> = original.actual_cursors.clone();
         return Ok((patch, cursors));
     }
 
@@ -380,13 +380,11 @@ pub async fn run_repair(
         .map(|e| format!("Failed to parse repair response: {}", e));
 
     let (actual_patch, actual_cursors) = parse_result.ok().unzip();
-    // todo! use multiple selections
-    let actual_cursor = actual_cursors.and_then(|cursors| cursors.into_iter().next());
 
     example.predictions.push(ExamplePrediction {
         actual_patch,
         actual_output: response,
-        actual_cursor,
+        actual_cursors: actual_cursors.unwrap_or_default(),
         error: err,
         provider: PredictionProvider::Repair,
     });

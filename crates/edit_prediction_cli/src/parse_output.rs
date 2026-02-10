@@ -25,8 +25,7 @@ pub fn run_parse_output(example: &mut Example) -> Result<()> {
         let (actual_patch, actual_cursors) =
             parse_prediction_output(example, &actual_output, provider)?;
         example.predictions[ix].actual_patch = Some(actual_patch);
-        // todo! use multiple selections
-        example.predictions[ix].actual_cursor = actual_cursors.into_iter().next();
+        example.predictions[ix].actual_cursors = actual_cursors;
     }
 
     Ok(())

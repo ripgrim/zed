@@ -209,7 +209,7 @@ pub async fn run_prediction(
             .push(ExamplePrediction {
                 actual_patch: None,
                 actual_output: String::new(),
-                actual_cursor: None,
+                actual_cursors: vec![],
                 error: None,
                 provider,
             });
@@ -336,8 +336,7 @@ async fn predict_anthropic(
         let prediction = ExamplePrediction {
             actual_patch: Some(actual_patch),
             actual_output,
-            // todo! use multiple selections
-            actual_cursor: actual_cursors.into_iter().next(),
+            actual_cursors,
             error: None,
             provider: if batched {
                 PredictionProvider::Teacher(backend)
@@ -410,8 +409,7 @@ async fn predict_openai(
         let prediction = ExamplePrediction {
             actual_patch: Some(actual_patch),
             actual_output,
-            // todo! use multiple selections
-            actual_cursor: actual_cursors.into_iter().next(),
+            actual_cursors,
             error: None,
             provider: if batched {
                 PredictionProvider::Teacher(backend)

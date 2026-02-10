@@ -98,14 +98,19 @@ pub struct ExamplePrediction {
     pub actual_patch: Option<String>,
     #[serde(deserialize_with = "deserialize_null_as_empty_string")]
     pub actual_output: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub actual_cursor: Option<ActualCursor>,
+    #[serde(
+        default,
+        alias = "actual_cursor",
+        deserialize_with = "deserialize_single_or_vec_or_null",
+        skip_serializing_if = "Vec::is_empty"
+    )]
+    pub actual_cursors: Vec<ActualCursor>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
     pub provider: PredictionProvider,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ActualCursor {
     pub path: String,
     pub row: u32,
@@ -194,6 +199,25 @@ where
 {
     let opt = Option::<String>::deserialize(deserializer)?;
     Ok(opt.unwrap_or_default())
+}
+
+fn deserialize_single_or_vec_or_null<'de, D>(deserializer: D) -> Result<Vec<ActualCursor>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    #[derive(Deserialize)]
+    #[serde(untagged)]
+    enum SingleOrVec {
+        Vec(Vec<ActualCursor>),
+        Single(ActualCursor),
+    }
+
+    let opt = Option::<SingleOrVec>::deserialize(deserializer)?;
+    Ok(match opt {
+        None => vec![],
+        Some(SingleOrVec::Vec(v)) => v,
+        Some(SingleOrVec::Single(c)) => vec![c],
+    })
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -384,4 +408,114 @@ fn parse_markdown_example(input: &str) -> Result<Example> {
         qa: Vec::new(),
         state: None,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn cursor(path: &str, row: u32, column: u32, offset: usize) -> ActualCursor {
+        ActualCursor {
+            path: path.to_string(),
+            row,
+            column,
+            offset,
+            editable_region_offset: None,
+            selection_start_offset: None,
+            selection_start_editable_region_offset: None,
+        }
+    }
+
+    fn cursor_json(path: &str, row: u32, column: u32, offset: usize) -> String {
+        format!(r#"{{"path": "{path}", "row": {row}, "column": {column}, "offset": {offset}}}"#)
+    }
+
+    fn prediction_json(cursor_field: &str) -> String {
+        format!(r#"{{"actual_output": "output", {cursor_field}"provider": "Sweep"}}"#)
+    }
+
+    #[test]
+    fn test_actual_cursors_deserialization() {
+        let c1 = cursor_json("src/a.rs", 1, 0, 10);
+        let c2 = cursor_json("src/b.rs", 2, 5, 20);
+
+        let cases: Vec<(&str, String, Vec<ActualCursor>)> = vec![
+            (
+                "legacy single object (actual_cursor)",
+                prediction_json(&format!(r#""actual_cursor": {c1}, "#)),
+                vec![cursor("src/a.rs", 1, 0, 10)],
+            ),
+            (
+                "legacy null (actual_cursor: null)",
+                prediction_json(r#""actual_cursor": null, "#),
+                vec![],
+            ),
+            ("missing field", prediction_json(""), vec![]),
+            (
+                "new array format (actual_cursors)",
+                prediction_json(&format!(r#""actual_cursors": [{c1}, {c2}], "#)),
+                vec![cursor("src/a.rs", 1, 0, 10), cursor("src/b.rs", 2, 5, 20)],
+            ),
+            (
+                "new null (actual_cursors: null)",
+                prediction_json(r#""actual_cursors": null, "#),
+                vec![],
+            ),
+            (
+                "empty array",
+                prediction_json(r#""actual_cursors": [], "#),
+                vec![],
+            ),
+            (
+                "legacy field name with array value",
+                prediction_json(&format!(r#""actual_cursor": [{c1}], "#)),
+                vec![cursor("src/a.rs", 1, 0, 10)],
+            ),
+        ];
+
+        for (name, json, expected) in cases {
+            let prediction: ExamplePrediction =
+                serde_json::from_str(&json).unwrap_or_else(|e| panic!("{name}: {e}"));
+            assert_eq!(prediction.actual_cursors, expected, "{name}");
+        }
+    }
+
+    #[test]
+    fn test_actual_cursors_roundtrip() {
+        let empty_prediction = ExamplePrediction {
+            actual_patch: None,
+            actual_output: "output".to_string(),
+            actual_cursors: vec![],
+            error: None,
+            provider: PredictionProvider::Sweep,
+        };
+        let empty_json = serde_json::to_value(&empty_prediction).unwrap();
+        assert!(empty_json.get("actual_cursors").is_none());
+        assert!(empty_json.get("actual_cursor").is_none());
+
+        let cursors = vec![
+            ActualCursor {
+                editable_region_offset: Some(5),
+                selection_start_offset: Some(8),
+                selection_start_editable_region_offset: Some(3),
+                ..cursor("src/a.rs", 1, 0, 10)
+            },
+            ActualCursor {
+                editable_region_offset: Some(45),
+                ..cursor("src/a.rs", 3, 4, 50)
+            },
+        ];
+
+        let prediction = ExamplePrediction {
+            actual_patch: Some("patch".to_string()),
+            actual_output: "output".to_string(),
+            actual_cursors: cursors.clone(),
+            error: None,
+            provider: PredictionProvider::Sweep,
+        };
+
+        let json_str = serde_json::to_string(&prediction).unwrap();
+        let roundtripped: ExamplePrediction = serde_json::from_str(&json_str).unwrap();
+        assert_eq!(roundtripped.actual_cursors, cursors);
+    }
 }
