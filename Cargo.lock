@@ -4952,7 +4952,7 @@ dependencies = [
  "paths",
  "picker",
  "serde",
- "serde_json",
+ "serde_json_lenient",
  "settings",
  "smol",
  "ui",

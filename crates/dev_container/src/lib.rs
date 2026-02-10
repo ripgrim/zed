@@ -1630,7 +1630,7 @@ where
         return Err(format!("Failed to read response body: {}", e));
     };
 
-    match serde_json::from_str(&output) {
+    match serde_json_lenient::from_str(&output) {
         Ok(response) => Ok(response),
         Err(e) => Err(format!("Failed to deserialize response: {}", e)),
     }

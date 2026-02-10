@@ -13,7 +13,9 @@ use smol::{fs, process::Command};
 use util::rel_path::RelPath;
 use workspace::Workspace;
 
-use crate::{DevContainerFeature, DevContainerSettings, DevContainerTemplate};
+use crate::{
+    DevContainerFeature, DevContainerSettings, DevContainerTemplate, model::spawn_dev_container,
+};
 
 /// Represents a discovered devcontainer configuration
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -271,17 +273,14 @@ pub async fn start_dev_container_with_config(
         return Err(DevContainerError::NotInValidProject);
     };
 
+    let Some(actual_config) = config.clone() else {
+        return Err(DevContainerError::NotInValidProject);
+    };
+
     let config_path = config.map(|c| directory.join(&c.config_path));
 
-    match devcontainer_up(
-        &path_to_devcontainer_cli,
-        found_in_path,
-        &node_runtime,
-        directory.clone(),
-        config_path.clone(),
-        use_podman,
-    )
-    .await
+    match spawn_dev_container(actual_config, Arc::new(directory.as_ref())) // TODO reffing here is gross
+        .await
     {
         Ok(DevContainerUp {
             container_id,
@@ -318,7 +317,7 @@ pub async fn start_dev_container_with_config(
             Ok((connection, remote_workspace_folder))
         }
         Err(err) => {
-            let message = format!("Failed with nested error: {}", err);
+            let message = format!("Failed with nested error: {:?}", err);
             Err(DevContainerError::DevContainerUpFailed(message))
         }
     }
@@ -443,7 +442,8 @@ async fn ensure_devcontainer_cli(
     }
 }
 
-async fn devcontainer_up(
+// Keeping this around for reference but should delete (or wrap the underlying docker work)
+async fn _devcontainer_up(
     path_to_cli: &PathBuf,
     found_in_path: bool,
     node_runtime: &NodeRuntime,
@@ -558,7 +558,7 @@ async fn devcontainer_template_apply(
     let mut command =
         devcontainer_cli_command(path_to_cli, found_in_path, &node_runtime_path, use_podman);
 
-    let Ok(serialized_options) = serde_json::to_string(template_options) else {
+    let Ok(serialized_options) = serde_json_lenient::to_string(template_options) else {
         log::error!("Unable to serialize options for {:?}", template_options);
         return Err(DevContainerError::DevContainerParseFailed);
     };
@@ -609,7 +609,7 @@ async fn devcontainer_template_apply(
 // Try to parse directly first (newer versions output pure JSON)
 // If that fails, look for JSON start (older versions have plaintext prefix)
 fn parse_json_from_cli<T: serde::de::DeserializeOwned>(raw: &str) -> Result<T, DevContainerError> {
-    serde_json::from_str::<T>(&raw)
+    serde_json_lenient::from_str::<T>(&raw)
         .or_else(|e| {
             log::error!("Error parsing json: {} - will try to find json object in larger plaintext", e);
             let json_start = raw
@@ -619,7 +619,7 @@ fn parse_json_from_cli<T: serde::de::DeserializeOwned>(raw: &str) -> Result<T, D
                     DevContainerError::DevContainerParseFailed
                 })?;
 
-            serde_json::from_str(&raw[json_start..]).map_err(|e| {
+            serde_json_lenient::from_str(&raw[json_start..]).map_err(|e| {
                 log::error!(
                     "Unable to parse JSON from devcontainer up output (starting at position {}), error: {:?}",
                     json_start,
@@ -696,7 +696,7 @@ fn template_features_to_json(features_selected: &HashSet<DevContainerFeature>) -
             map
         })
         .collect::<Vec<HashMap<&str, String>>>();
-    serde_json::to_string(&features_map).unwrap()
+    serde_json_lenient::to_string(&features_map).unwrap()
 }
 
 #[cfg(test)]
