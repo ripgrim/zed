@@ -5,6 +5,7 @@ use crate::{
     repair,
 };
 use anyhow::{Context as _, Result};
+use std::ops::Range;
 use zeta_prompt::{CURSOR_MARKER, ZetaFormat};
 
 pub fn run_parse_output(example: &mut Example) -> Result<()> {
@@ -93,12 +94,10 @@ fn parse_zeta2_output(
     let old_text = extract_zeta2_current_region(prompt, format)?;
 
     let mut new_text = actual_output.to_string();
-    let cursor_offset = if let Some(offset) = new_text.find(CURSOR_MARKER) {
-        new_text.replace_range(offset..offset + CURSOR_MARKER.len(), "");
-        Some(offset)
-    } else {
-        None
-    };
+    let selection_ranges = TeacherPrompt::extract_selections(&new_text);
+    new_text = new_text
+        .replace(TeacherPrompt::SELECTION_START_MARKER, "")
+        .replace(CURSOR_MARKER, "");
 
     let suffix = match format {
         ZetaFormat::V0131GitMergeMarkersPrefix => {
@@ -153,12 +152,12 @@ fn parse_zeta2_output(
         path = example.spec.cursor_path.to_string_lossy(),
     );
 
-    let actual_cursors: Vec<ActualCursor> = cursor_offset
+    let actual_cursors: Vec<ActualCursor> = selection_ranges
         .into_iter()
-        .map(|editable_region_cursor_offset| {
+        .map(|selection: Range<usize>| {
             ActualCursor::from_editable_region(
                 &example.spec.cursor_path,
-                editable_region_cursor_offset..editable_region_cursor_offset,
+                selection,
                 &new_text,
                 &prompt_inputs.content,
                 editable_region_offset,

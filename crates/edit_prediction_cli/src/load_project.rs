@@ -165,7 +165,7 @@ async fn cursor_position_and_selection(
 
     let (cursor_excerpt, selections_within_excerpt) =
         example.spec.cursor_excerpt_with_selection()?;
-    // todo! use multiple selections
+    // NOTE: assuming there is only one selection in input. Must be changed to support multiple selections in input
     let first_selection = selections_within_excerpt.first().cloned().unwrap_or(0..0);
     let cursor_offset_within_excerpt = first_selection.end;
     let selection_start_within_excerpt = first_selection.start;

@@ -100,15 +100,13 @@ pub async fn run_format_prompt(
                 .into_iter()
                 .next()
                 .context("expected patches is empty")?;
-            // todo! use multiple selections
-            let expected_cursor_offset = expected_selections.first().map(|s| s.end);
             let expected_output =
-                zeta2_output_for_patch(&input, &expected_patch, expected_cursor_offset, version)?;
+                zeta2_output_for_patch(&input, &expected_patch, &expected_selections, version)?;
             let rejected_output = example
                 .spec
                 .rejected_patch
                 .as_ref()
-                .and_then(|patch| zeta2_output_for_patch(&input, patch, None, version).ok());
+                .and_then(|patch| zeta2_output_for_patch(&input, patch, &[], version).ok());
 
             example.prompt = Some(ExamplePrompt {
                 input: prompt,
@@ -127,7 +125,7 @@ pub async fn run_format_prompt(
 pub fn zeta2_output_for_patch(
     input: &zeta_prompt::ZetaPromptInput,
     patch: &str,
-    cursor_offset: Option<usize>,
+    selections: &[Range<usize>],
     version: ZetaFormat,
 ) -> Result<String> {
     let mut old_editable_region =
@@ -147,13 +145,19 @@ pub fn zeta2_output_for_patch(
             },
         )?;
 
-    if let Some(cursor_offset) = cursor_offset {
-        // The cursor_offset is relative to the start of the hunk's new text (context + additions).
-        // We need to add where the hunk context matched in the editable region to compute
-        // the actual cursor position in the result.
-        let hunk_start = first_hunk_offset.unwrap_or(0);
-        let offset = (hunk_start + cursor_offset).min(result.len());
-        result.insert_str(offset, zeta_prompt::CURSOR_MARKER);
+    // Each selection is relative to the start of the hunk's new text (context + additions).
+    // We need to add where the hunk context matched in the editable region to compute
+    // the actual positions in the result. Insert in reverse order so earlier
+    // insertions don't shift later offsets. For each selection, insert the cursor
+    // marker at the end first, then the selection start marker (if non-empty).
+    let hunk_start = first_hunk_offset.unwrap_or(0);
+    for selection in selections.iter().rev() {
+        let end = (hunk_start + selection.end).min(result.len());
+        result.insert_str(end, TeacherPrompt::USER_CURSOR_MARKER);
+        if selection.start != selection.end {
+            let start = (hunk_start + selection.start).min(result.len());
+            result.insert_str(start, TeacherPrompt::SELECTION_START_MARKER);
+        }
     }
 
     match version {
@@ -289,7 +293,7 @@ impl TeacherPrompt {
     /// Returns byte-offset ranges in the *marker-stripped* text. Each range
     /// represents one selection: `start..end` where `start == end` means an
     /// empty cursor and `start < end` means selected text.
-    fn extract_selections(text_with_markers: &str) -> Vec<Range<usize>> {
+    pub(crate) fn extract_selections(text_with_markers: &str) -> Vec<Range<usize>> {
         #[derive(Clone, Copy, PartialEq)]
         enum Kind {
             SelectionStart,
@@ -892,18 +896,12 @@ mod tests {
                         )
                     });
 
-            // Insert cursor/selection markers into the actual text.
-            // todo! use multiple selections
-            let actual_with_markers = if let Some(cursor) = actual_cursors.first() {
-                let selection = cursor.editable_region_selection().unwrap_or(0..0);
-                util::test::generate_marked_text(
-                    &actual_text,
-                    &[selection],
-                    true, // indicate_cursors - shows direction with ˇ
-                )
-            } else {
-                actual_text.clone()
-            };
+            let selections: Vec<std::ops::Range<usize>> = actual_cursors
+                .iter()
+                .filter_map(|c| c.editable_region_selection())
+                .collect();
+            let actual_with_markers =
+                util::test::generate_marked_text(&actual_text, &selections, true);
 
             // Compare with expected.
             assert_eq!(
