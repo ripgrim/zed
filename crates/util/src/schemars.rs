@@ -35,9 +35,14 @@ pub fn add_new_subschema(
     schemars::Schema::new_ref(format!("{DEFS_PATH}{name}"))
 }
 
-/// Defaults `additionalProperties` to `true`, as if `#[schemars(deny_unknown_fields)]` was on every
-/// struct. Skips structs that have `additionalProperties` set (such as if #[serde(flatten)] is used
-/// on a map).
+/// Defaults to denying unknown fields, as if `#[schemars(deny_unknown_fields)]` was on every
+/// struct. Skips structs that have `additionalProperties` or `unevaluatedProperties` already set
+/// (such as if #[serde(flatten)] is used on a map).
+///
+/// When `allOf` is present (e.g. from `#[serde(flatten)]`), uses `unevaluatedProperties: false`
+/// instead of `additionalProperties: false`, because `additionalProperties` only considers
+/// properties in the local `properties` object and would incorrectly reject properties contributed
+/// by `allOf` members.
 #[derive(Clone)]
 pub struct DefaultDenyUnknownFields;
 
@@ -48,7 +53,11 @@ impl schemars::transform::Transform for DefaultDenyUnknownFields {
             && !object.contains_key("additionalProperties")
             && !object.contains_key("unevaluatedProperties")
         {
-            object.insert("additionalProperties".to_string(), false.into());
+            if object.contains_key("allOf") {
+                object.insert("unevaluatedProperties".to_string(), false.into());
+            } else {
+                object.insert("additionalProperties".to_string(), false.into());
+            }
         }
         transform_subschemas(self, schema);
     }
