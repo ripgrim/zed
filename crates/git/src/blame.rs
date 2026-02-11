@@ -61,7 +61,7 @@ async fn run_git_blame(
     let mut child = {
         let span = ztracing::debug_span!("spawning git-blame command", path = path.as_unix_str());
         let _enter = span.enter();
-        util::command::new_smol_command(git_binary)
+        util::command::new_command(git_binary)
             .current_dir(working_directory)
             .arg("blame")
             .arg("--incremental")
@@ -84,6 +84,7 @@ async fn run_git_blame(
         stdin.write_all(chunk.as_bytes()).await?;
     }
     stdin.flush().await?;
+    drop(child.stdin.take());
 
     let output = child.output().await.context("reading git blame output")?;
 
