@@ -221,6 +221,108 @@ impl CompiledRegex {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ToolPermissionDecision {
+    Allow,
+    Deny(String),
+    Confirm,
+}
+
+/// Determines the permission decision for a tool invocation based on configured rules.
+///
+/// # Precedence Order (highest to lowest)
+///
+/// 1. **`always_allow_tool_actions`** - When enabled, allows all tool actions except those
+///    blocked by `always_deny` patterns. This global setting takes precedence over
+///    `always_confirm` patterns and `default_mode`.
+/// 2. **`always_deny`** - If any deny pattern matches, the tool call is blocked immediately.
+///    This takes precedence over all other rules for security (including `always_allow_tool_actions`).
+/// 3. **`always_confirm`** - If any confirm pattern matches (and no deny matched),
+///    the user is prompted for confirmation (unless `always_allow_tool_actions` is enabled).
+/// 4. **`always_allow`** - If any allow pattern matches (and no deny/confirm matched),
+///    the tool call proceeds without prompting.
+/// 5. **`default_mode`** - If no patterns match, falls back to the tool's default mode.
+pub fn decide_permission(
+    tool_name: &str,
+    input: &str,
+    permissions: &ToolPermissions,
+    always_allow_tool_actions: bool,
+) -> ToolPermissionDecision {
+    let rules = permissions.tools.get(tool_name);
+
+    let rules = match rules {
+        Some(rules) => rules,
+        None => {
+            return if always_allow_tool_actions {
+                ToolPermissionDecision::Allow
+            } else {
+                ToolPermissionDecision::Confirm
+            };
+        }
+    };
+
+    if let Some(error) = check_invalid_patterns(tool_name, rules) {
+        return ToolPermissionDecision::Deny(error);
+    }
+
+    if rules.always_deny.iter().any(|r| r.is_match(input)) {
+        return ToolPermissionDecision::Deny(format!(
+            "Command blocked by security rule for {} tool",
+            tool_name
+        ));
+    }
+
+    if rules.always_confirm.iter().any(|r| r.is_match(input)) {
+        if !always_allow_tool_actions {
+            return ToolPermissionDecision::Confirm;
+        }
+    }
+
+    if rules.always_allow.iter().any(|r| r.is_match(input)) {
+        return ToolPermissionDecision::Allow;
+    }
+
+    if always_allow_tool_actions {
+        return ToolPermissionDecision::Allow;
+    }
+
+    match rules.default_mode {
+        ToolPermissionMode::Deny => {
+            ToolPermissionDecision::Deny(format!("{} tool is disabled", tool_name))
+        }
+        ToolPermissionMode::Allow => ToolPermissionDecision::Allow,
+        ToolPermissionMode::Confirm => ToolPermissionDecision::Confirm,
+    }
+}
+
+pub fn decide_permission_from_settings(
+    tool_name: &str,
+    input: &str,
+    settings: &AgentSettings,
+) -> ToolPermissionDecision {
+    decide_permission(
+        tool_name,
+        input,
+        &settings.tool_permissions,
+        settings.always_allow_tool_actions,
+    )
+}
+
+fn check_invalid_patterns(tool_name: &str, rules: &ToolRules) -> Option<String> {
+    if rules.invalid_patterns.is_empty() {
+        return None;
+    }
+
+    let count = rules.invalid_patterns.len();
+    let pattern_word = if count == 1 { "pattern" } else { "patterns" };
+
+    Some(format!(
+        "The {} tool cannot run because {} regex {} failed to compile. \
+         Please fix the invalid patterns in your tool_permissions settings.",
+        tool_name, count, pattern_word
+    ))
+}
+
 impl Settings for AgentSettings {
     fn from_settings(content: &settings::SettingsContent) -> Self {
         let agent = content.agent.clone().unwrap();

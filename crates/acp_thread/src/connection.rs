@@ -652,6 +652,7 @@ mod test_support {
                                         tool_call.clone().into(),
                                         options.clone(),
                                         false,
+                                        None,
                                         cx,
                                     )
                                 })??

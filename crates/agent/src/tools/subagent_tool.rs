@@ -531,10 +531,20 @@ fn forward_event_to_acp_thread(
             tool_call,
             options,
             response,
-            ..
+            context,
         }) => {
+            let permission_input = context.map(|ctx| acp_thread::PermissionInput {
+                tool_name: ctx.tool_name,
+                input_value: ctx.input_value,
+            });
             let outcome_task = acp_thread.update(cx, |thread, cx| {
-                thread.request_tool_call_authorization(tool_call, options, true, cx)
+                thread.request_tool_call_authorization(
+                    tool_call,
+                    options,
+                    true,
+                    permission_input,
+                    cx,
+                )
             });
             if let Ok(Ok(task)) = outcome_task {
                 cx.background_spawn(async move {

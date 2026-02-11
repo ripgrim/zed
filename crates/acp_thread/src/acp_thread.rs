@@ -3,7 +3,7 @@ mod diff;
 mod mention;
 mod terminal;
 
-use agent_settings::AgentSettings;
+use agent_settings::{AgentSettings, ToolPermissionDecision, decide_permission_from_settings};
 
 /// Key used in ACP ToolCall meta to store the tool's programmatic name.
 /// This is a workaround since ACP's ToolCall doesn't have a dedicated name field.
@@ -470,6 +470,14 @@ impl From<&ResolvedLocation> for AgentLocation {
     }
 }
 
+/// Stores the tool name and input value needed to re-evaluate permission
+/// decisions when settings change while a tool call is awaiting confirmation.
+#[derive(Clone, Debug)]
+pub struct PermissionInput {
+    pub tool_name: String,
+    pub input_value: String,
+}
+
 #[derive(Debug)]
 pub enum ToolCallStatus {
     /// The tool call hasn't started running yet, but we start showing it to
@@ -479,6 +487,7 @@ pub enum ToolCallStatus {
     WaitingForConfirmation {
         options: PermissionOptions,
         respond_tx: oneshot::Sender<acp::PermissionOptionId>,
+        permission_input: Option<PermissionInput>,
     },
     /// The tool call is currently running.
     InProgress,
@@ -961,6 +970,7 @@ pub struct AcpThread {
     token_usage: Option<TokenUsage>,
     prompt_capabilities: acp::PromptCapabilities,
     _observe_prompt_capabilities: Task<anyhow::Result<()>>,
+    _observe_settings: gpui::Subscription,
     terminals: HashMap<acp::TerminalId, Entity<Terminal>>,
     pending_terminal_output: HashMap<acp::TerminalId, Vec<Vec<u8>>>,
     pending_terminal_exit: HashMap<acp::TerminalId, acp::TerminalExitStatus>,
@@ -1179,6 +1189,9 @@ impl AcpThread {
             }
         });
 
+        let observe_settings =
+            cx.observe_global::<AgentSettings>(Self::re_evaluate_pending_authorizations);
+
         Self {
             action_log,
             shared_buffers: Default::default(),
@@ -1192,6 +1205,7 @@ impl AcpThread {
             token_usage: None,
             prompt_capabilities,
             _observe_prompt_capabilities: task,
+            _observe_settings: observe_settings,
             terminals: HashMap::default(),
             pending_terminal_output: HashMap::default(),
             pending_terminal_exit: HashMap::default(),
@@ -1719,6 +1733,7 @@ impl AcpThread {
         tool_call: acp::ToolCallUpdate,
         options: PermissionOptions,
         respect_always_allow_setting: bool,
+        permission_input: Option<PermissionInput>,
         cx: &mut Context<Self>,
     ) -> Result<BoxFuture<'static, acp::RequestPermissionOutcome>> {
         let (tx, rx) = oneshot::channel();
@@ -1740,6 +1755,7 @@ impl AcpThread {
         let status = ToolCallStatus::WaitingForConfirmation {
             options,
             respond_tx: tx,
+            permission_input,
         };
 
         self.upsert_tool_call_inner(tool_call, status, cx)?;
@@ -1756,6 +1772,65 @@ impl AcpThread {
         .boxed();
 
         Ok(fut)
+    }
+
+    fn re_evaluate_pending_authorizations(&mut self, cx: &mut Context<Self>) {
+        let settings = AgentSettings::get_global(cx).clone();
+
+        let mut resolutions: Vec<(usize, ToolCallStatus, acp::PermissionOptionId)> = Vec::new();
+
+        for (ix, entry) in self.entries.iter().enumerate() {
+            let AgentThreadEntry::ToolCall(call) = entry else {
+                continue;
+            };
+
+            let permission_input = match &call.status {
+                ToolCallStatus::WaitingForConfirmation {
+                    permission_input: Some(input),
+                    ..
+                } => input,
+                _ => continue,
+            };
+
+            let decision = decide_permission_from_settings(
+                &permission_input.tool_name,
+                &permission_input.input_value,
+                &settings,
+            );
+
+            match decision {
+                ToolPermissionDecision::Allow => {
+                    resolutions.push((
+                        ix,
+                        ToolCallStatus::InProgress,
+                        acp::PermissionOptionId::new("allow"),
+                    ));
+                }
+                ToolPermissionDecision::Deny(_) => {
+                    resolutions.push((
+                        ix,
+                        ToolCallStatus::Rejected,
+                        acp::PermissionOptionId::new("deny"),
+                    ));
+                }
+                ToolPermissionDecision::Confirm => {}
+            }
+        }
+
+        for (ix, new_status, option_id) in resolutions {
+            let resolved = if let AgentThreadEntry::ToolCall(call) = &mut self.entries[ix] {
+                let curr_status = mem::replace(&mut call.status, new_status);
+                if let ToolCallStatus::WaitingForConfirmation { respond_tx, .. } = curr_status {
+                    respond_tx.send(option_id).log_err();
+                }
+                true
+            } else {
+                false
+            };
+            if resolved {
+                cx.emit(AcpThreadEvent::EntryUpdated(ix));
+            }
+        }
     }
 
     pub fn authorize_tool_call(

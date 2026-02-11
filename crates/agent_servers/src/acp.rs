@@ -1090,6 +1090,7 @@ impl acp::Client for ClientDelegate {
                 arguments.tool_call,
                 acp_thread::PermissionOptions::Flat(arguments.options),
                 respect_always_allow_setting,
+                None,
                 cx,
             )
         })??;
