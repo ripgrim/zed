@@ -5,11 +5,119 @@ use smol::process::Command;
 
 use crate::{DevContainerConfig, devcontainer_api::DevContainerUp};
 
+/**
+ * What to do, and in what order:
+ * SPAWNING the dev container (this week)
+ * - Fill out the remainder of the spec (from devcontainer.json)
+ * - Expand pre-defined variables
+ * - Execute appropriately on Dockerfile
+ * - Execute appropriately for docker-compose
+ * - Add validations for semantic issues (e.g. both `image` and `Dockerfile` defined)
+ * - Executing the hooks (pre-create, post-create)
+ * INITIALIZING the dev container (this/next week)
+ * - Pulling from the known sources
+ * - Expanding the template into appropriate files
+ * - Adding the features to devcontainer.json as they are defined (TODO ensure you understand whether they can interoperate with Dockerfiles, etc)
+ * CUSTOMIZING the dev container (next/following week)
+ * - Defining how extensions can be added
+ * EASE OF USE (following week)
+ * - Detect when devcontainer.json/definition is changed, offer to rebuild
+ * - Provide option to rebuild in any event
+ * - When installing an extension from within a dev container, offer to add it to the json definition
+ */
+
+// So, when remoteUser is specified here, it seems that this is _not_ propagated to the labels in the docker container
+// Which is interesting. I guess the read-configuration API just need to talk to the file, not the docker itself
+// And the configuration doesn't make any promises about creating the user. Still weird though
+#[derive(Debug, Deserialize, Serialize, Eq, PartialEq, Default)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct DevContainer {
+    pub(crate) image: Option<String>,
+    pub(crate) name: Option<String>,
+    remote_user: Option<String>,
+    // TODO things we're not yet accounting for below
+    forward_ports: Option<Vec<String>>, // TODO not strings actually, more complex object
+    ports_attributes: Option<HashMap<String, PortsAttributes>>, // TODO key here should be the same object as what's used above for forwardPorts
+    other_ports_attributes: Option<PortsAttributes>, // TODO I think that's right? Confirm the spec when you get to it
+    container_env: Option<HashMap<String, String>>,
+    remote_env: Option<HashMap<String, String>>,
+    container_user: Option<String>,
+    update_remote_user_uid: Option<bool>,
+    user_env_probe: Option<UserEnvProbe>,
+    override_command: Option<bool>,
+    shutdown_action: Option<ShutdownAction>,
+    init: Option<bool>,
+    privileged: Option<bool>,
+    cap_add: Option<Vec<String>>,
+    security_opt: Option<Vec<String>>,
+    mounts: Option<String>, // TODO the type here is weird, check spec when you get to it
+    features: Option<HashMap<String, String>>, // TODO more complex object probably needed here
+    override_feature_install_order: Option<Vec<String>>,
+    // TODO customizations
+    build: Option<ContainerBuild>,
+    app_port: Option<String>, // TODO this could be string, int, array, so needs special care
+    workspace_mount: Option<String>,
+    workspace_folder: Option<String>,
+    run_args: Option<Vec<String>>,
+    // Docker compose stuff:
+    docker_compose_file: Option<Vec<String>>, // TODO this can be a string or array of strings
+    service: Option<String>,
+    run_services: Option<Vec<String>>,
+    // Scripts
+    initialize_command: Option<LifecyleScript>,
+    on_create_command: Option<LifecyleScript>,
+    update_content_command: Option<LifecyleScript>,
+    post_create_command: Option<LifecyleScript>,
+    post_start_command: Option<LifecyleScript>,
+    post_attach_command: Option<LifecyleScript>,
+    wait_for: Option<LifecycleCommand>,
+    host_requirements: Option<HostRequirements>,
+}
+
 #[derive(Debug, Deserialize, Serialize, Eq, PartialEq)]
 #[serde(rename_all = "camelCase")]
-struct DevContainer {
-    image: Option<String>,
+pub(crate) struct HostRequirements {
+    cpus: Option<u16>,
+    memory: Option<String>,
+    storage: Option<String>,
+    gpu: Option<String>, // TODO complex object needed here
 }
+
+#[derive(Debug, Deserialize, Serialize, Eq, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub(crate) enum LifecycleCommand {
+    UpdateContentCommand,
+    OnCreatecommand,
+}
+
+#[derive(Debug, Deserialize, Serialize, Eq, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct LifecyleScript; // TODO
+
+#[derive(Debug, Deserialize, Serialize, Eq, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct ContainerBuild; // TODO
+
+#[derive(Debug, Deserialize, Serialize, Eq, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub(crate) enum ShutdownAction {
+    None,
+    StopContainer,
+    StopCompose,
+}
+
+#[derive(Debug, Deserialize, Serialize, Eq, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub(crate) enum UserEnvProbe {
+    None,
+    InteractiveShell,
+    LoginShell,
+    LoginInteractiveShell,
+}
+
+#[derive(Debug, Deserialize, Serialize, Eq, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct PortsAttributes;
 
 #[derive(Debug, Eq, PartialEq)]
 pub(crate) enum RenameMeError {
@@ -74,6 +182,20 @@ struct DockerPs {
 // TODO podman
 fn docker_cli() -> &'static str {
     "docker"
+}
+
+pub(crate) fn read_devcontainer_configuration(
+    config: DevContainerConfig,
+    local_project_path: Arc<&Path>,
+) -> Result<DevContainer, RenameMeError> {
+    let config_path = local_project_path.join(config.config_path);
+
+    let devcontainer_contents = std::fs::read_to_string(&config_path).map_err(|e| {
+        log::error!("Unable to read devcontainer contents: {e}");
+        RenameMeError::UnmappedError
+    })?;
+
+    deserialize_devcontainer_json(&devcontainer_contents)
 }
 
 pub(crate) async fn spawn_dev_container(
@@ -156,7 +278,7 @@ pub(crate) async fn spawn_dev_container(
         return Err(RenameMeError::UnmappedError);
     };
 
-    let remote_user = get_remote_user_from_config(&docker_inspect)?;
+    let remote_user = get_remote_user_from_config(&docker_inspect, &devcontainer)?;
 
     let remote_folder =
         get_remote_dir_from_config(&docker_inspect, (&local_project_path.display()).to_string())?;
@@ -292,8 +414,18 @@ fn get_remote_dir_from_config(
     Err(RenameMeError::UnmappedError)
 }
 
-fn get_remote_user_from_config(config: &DockerInspect) -> Result<String, RenameMeError> {
-    let Some(metadata) = &config.config.labels.metadata else {
+fn get_remote_user_from_config(
+    docker_config: &DockerInspect,
+    devcontainer_config: &DevContainer,
+) -> Result<String, RenameMeError> {
+    if let DevContainer {
+        remote_user: Some(user),
+        ..
+    } = devcontainer_config
+    {
+        return Ok(user.clone());
+    }
+    let Some(metadata) = &docker_config.config.labels.metadata else {
         return Err(RenameMeError::UnmappedError);
     };
     for metadatum in metadata {
@@ -336,7 +468,15 @@ mod test {
             RenameMeError::DevContainerParseFailed
         );
 
-        let given_good_json = "{\"image\": \"mcr.microsoft.com/devcontainers/base:ubuntu\"}";
+        let given_good_json = r#"
+            // These are some external comments. serde_lenient should handle them
+            {
+                // These are some internal comments
+                "image": "mcr.microsoft.com/devcontainers/base:ubuntu",
+                "name": "myDevContainer",
+                "remoteUser": "root",
+            }
+            "#;
 
         let result: Result<DevContainer, RenameMeError> =
             deserialize_devcontainer_json(given_good_json);
@@ -345,13 +485,23 @@ mod test {
         assert_eq!(
             result.expect("ok"),
             DevContainer {
-                image: Some(String::from("mcr.microsoft.com/devcontainers/base:ubuntu"))
+                image: Some(String::from("mcr.microsoft.com/devcontainers/base:ubuntu")),
+                name: Some(String::from("myDevContainer")),
+                remote_user: Some(String::from("root")),
+                ..Default::default()
             }
         );
     }
 
     #[test]
-    fn should_get_remote_user_from_devcontainer_config() {
+    fn should_get_remote_user_from_devcontainer_if_available() {
+        let given_dev_container = DevContainer {
+            image: Some("image".to_string()),
+            name: None,
+            remote_user: Some("root".to_string()),
+            ..Default::default()
+        };
+
         let mut metadata = HashMap::new();
         metadata.insert(
             "remoteUser".to_string(),
@@ -366,7 +516,37 @@ mod test {
             mounts: None,
         };
 
-        let remote_user = get_remote_user_from_config(&given_docker_config);
+        let remote_user =
+            get_remote_user_from_config(&given_docker_config, &given_dev_container).unwrap();
+
+        assert_eq!(remote_user, "root".to_string())
+    }
+
+    #[test]
+    fn should_get_remote_user_from_docker_config() {
+        let mut metadata = HashMap::new();
+        metadata.insert(
+            "remoteUser".to_string(),
+            serde_json_lenient::Value::String("vsCode".to_string()),
+        );
+        let given_docker_config = DockerInspect {
+            config: DockerInspectConfig {
+                labels: DockerConfigLabels {
+                    metadata: Some(vec![metadata]),
+                },
+            },
+            mounts: None,
+        };
+
+        let remote_user = get_remote_user_from_config(
+            &given_docker_config,
+            &DevContainer {
+                image: None,
+                name: None,
+                remote_user: None,
+                ..Default::default()
+            },
+        );
 
         assert!(remote_user.is_ok());
         let remote_user = remote_user.expect("ok");
@@ -382,6 +562,9 @@ mod test {
         );
         let given_devcontainer = DevContainer {
             image: Some("mcr.microsoft.com/devcontainers/base:ubuntu".to_string()),
+            name: Some("DevContainerName".to_string()),
+            remote_user: None,
+            ..Default::default()
         };
 
         let labels = vec![
@@ -504,9 +687,17 @@ while sleep 1 & wait $!; do :; done
             "#;
 
         let deserialized = serde_json_lenient::from_str::<DockerInspect>(given_config);
-        // assert!(deserialized.is_ok());
+        assert!(deserialized.is_ok());
         let config = deserialized.unwrap();
-        let remote_user = get_remote_user_from_config(&config);
+        let remote_user = get_remote_user_from_config(
+            &config,
+            &DevContainer {
+                image: None,
+                name: None,
+                remote_user: None,
+                ..Default::default()
+            },
+        );
 
         assert!(remote_user.is_ok());
         assert_eq!(remote_user.unwrap(), "vscode".to_string())

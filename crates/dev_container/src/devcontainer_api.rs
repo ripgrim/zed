@@ -14,7 +14,8 @@ use util::rel_path::RelPath;
 use workspace::Workspace;
 
 use crate::{
-    DevContainerFeature, DevContainerSettings, DevContainerTemplate, model::spawn_dev_container,
+    DevContainerFeature, DevContainerSettings, DevContainerTemplate,
+    model::{DevContainer, read_devcontainer_configuration, spawn_dev_container},
 };
 
 /// Represents a discovered devcontainer configuration
@@ -50,15 +51,17 @@ pub(crate) struct DevContainerApply {
     pub(crate) files: Vec<String>,
 }
 
+// Keep around for posterity for now
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub(crate) struct DevContainerConfiguration {
+pub(crate) struct _DevContainerConfiguration {
     name: Option<String>,
 }
 
+// Keep around for posterity for now
 #[derive(Debug, Deserialize)]
-pub(crate) struct DevContainerConfigurationOutput {
-    configuration: DevContainerConfiguration,
+pub(crate) struct _DevContainerConfigurationOutput {
+    configuration: _DevContainerConfiguration,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -101,25 +104,19 @@ impl Display for DevContainerError {
     }
 }
 
-pub(crate) async fn read_devcontainer_configuration_for_project(
+pub(crate) async fn read_default_devcontainer_configuration(
     cx: &mut AsyncWindowContext,
-    node_runtime: &NodeRuntime,
-) -> Result<DevContainerConfigurationOutput, DevContainerError> {
-    let (path_to_devcontainer_cli, found_in_path) = ensure_devcontainer_cli(&node_runtime).await?;
-
+) -> Result<DevContainer, DevContainerError> {
     let Some(directory) = project_directory(cx) else {
         return Err(DevContainerError::NotInValidProject);
     };
 
-    devcontainer_read_configuration(
-        &path_to_devcontainer_cli,
-        found_in_path,
-        node_runtime,
-        &directory,
-        None,
-        use_podman(cx),
-    )
-    .await
+    let default_config = DevContainerConfig::default_config();
+
+    read_devcontainer_configuration(default_config, Arc::new(directory.as_ref())).map_err(|e| {
+        log::error!("Default configuration not found: {:?}", e);
+        DevContainerError::DevContainerNotFound
+    })
 }
 
 pub(crate) async fn apply_dev_container_template(
@@ -261,13 +258,13 @@ pub fn find_devcontainer_configs(cx: &mut AsyncWindowContext) -> Vec<DevContaine
 
 pub async fn start_dev_container_with_config(
     cx: &mut AsyncWindowContext,
-    node_runtime: NodeRuntime,
+
     config: Option<DevContainerConfig>,
 ) -> Result<(DevContainerConnection, String), DevContainerError> {
     let use_podman = use_podman(cx);
     check_for_docker(use_podman).await?;
 
-    let (path_to_devcontainer_cli, found_in_path) = ensure_devcontainer_cli(&node_runtime).await?;
+    // let (path_to_devcontainer_cli, found_in_path) = ensure_devcontainer_cli(&node_runtime).await?;
 
     let Some(directory) = project_directory(cx) else {
         return Err(DevContainerError::NotInValidProject);
@@ -277,9 +274,9 @@ pub async fn start_dev_container_with_config(
         return Err(DevContainerError::NotInValidProject);
     };
 
-    let config_path = config.map(|c| directory.join(&c.config_path));
+    // let config_path = config.map(|c| directory.join(&c.config_path));
 
-    match spawn_dev_container(actual_config, Arc::new(directory.as_ref())) // TODO reffing here is gross
+    match spawn_dev_container(actual_config.clone(), Arc::new(directory.as_ref())) // TODO reffing here is gross
         .await
     {
         Ok(DevContainerUp {
@@ -288,22 +285,13 @@ pub async fn start_dev_container_with_config(
             remote_user,
             ..
         }) => {
-            let project_name = match devcontainer_read_configuration(
-                &path_to_devcontainer_cli,
-                found_in_path,
-                &node_runtime,
-                &directory,
-                config_path.as_ref(),
-                use_podman,
-            )
-            .await
-            {
-                Ok(DevContainerConfigurationOutput {
-                    configuration:
-                        DevContainerConfiguration {
-                            name: Some(project_name),
-                        },
-                }) => project_name,
+            let project_name = match read_devcontainer_configuration(
+                actual_config,
+                Arc::new(directory.as_ref()),
+            ) {
+                Ok(DevContainer {
+                    name: Some(name), ..
+                }) => name,
                 _ => get_backup_project_name(&remote_workspace_folder, &container_id),
             };
 
@@ -493,14 +481,15 @@ async fn _devcontainer_up(
     }
 }
 
-async fn devcontainer_read_configuration(
+// Keeping for posterity
+async fn _devcontainer_read_configuration(
     path_to_cli: &PathBuf,
     found_in_path: bool,
     node_runtime: &NodeRuntime,
     path: &Arc<Path>,
     config_path: Option<&PathBuf>,
     use_podman: bool,
-) -> Result<DevContainerConfigurationOutput, DevContainerError> {
+) -> Result<_DevContainerConfigurationOutput, DevContainerError> {
     let Ok(node_runtime_path) = node_runtime.binary_path().await else {
         log::error!("Unable to find node runtime path");
         return Err(DevContainerError::NodeRuntimeNotAvailable);
@@ -540,6 +529,7 @@ async fn devcontainer_read_configuration(
     }
 }
 
+// This will probably be the hardest
 async fn devcontainer_template_apply(
     template: &DevContainerTemplate,
     template_options: &HashMap<String, String>,

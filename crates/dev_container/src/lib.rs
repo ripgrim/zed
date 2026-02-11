@@ -42,7 +42,7 @@ use http_client::{AsyncBody, HttpClient};
 mod devcontainer_api;
 mod model;
 
-use devcontainer_api::read_devcontainer_configuration_for_project;
+use devcontainer_api::read_default_devcontainer_configuration;
 
 use crate::devcontainer_api::DevContainerError;
 use crate::devcontainer_api::apply_dev_container_template;
@@ -1434,11 +1434,7 @@ fn dispatch_apply_templates(
                 workspace.app_state().node_runtime.clone()
             });
 
-            if check_for_existing
-                && read_devcontainer_configuration_for_project(cx, &node_runtime)
-                    .await
-                    .is_ok()
-            {
+            if check_for_existing && read_default_devcontainer_configuration(cx).await.is_ok() {
                 this.update_in(cx, |this, window, cx| {
                     this.accept_message(
                         DevContainerMessage::NeedConfirmWriteDevContainer(template_entry),

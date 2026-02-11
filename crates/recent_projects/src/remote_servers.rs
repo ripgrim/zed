@@ -1841,34 +1841,32 @@ impl RemoteServerProjects {
         let replace_window = window.window_handle().downcast::<Workspace>();
 
         cx.spawn_in(window, async move |entity, cx| {
-            let (connection, starting_dir) =
-                match start_dev_container_with_config(cx, app_state.node_runtime.clone(), config)
+            let (connection, starting_dir) = match start_dev_container_with_config(cx, config).await
+            {
+                Ok((c, s)) => (Connection::DevContainer(c), s),
+                Err(e) => {
+                    log::error!("Failed to start dev container: {:?}", e);
+                    cx.prompt(
+                        gpui::PromptLevel::Critical,
+                        "Failed to start Dev Container. See logs for details",
+                        Some(&format!("{e}")),
+                        &["Ok"],
+                    )
                     .await
-                {
-                    Ok((c, s)) => (Connection::DevContainer(c), s),
-                    Err(e) => {
-                        log::error!("Failed to start dev container: {:?}", e);
-                        cx.prompt(
-                            gpui::PromptLevel::Critical,
-                            "Failed to start Dev Container. See logs for details",
-                            Some(&format!("{e}")),
-                            &["Ok"],
-                        )
-                        .await
+                    .ok();
+                    entity
+                        .update_in(cx, |remote_server_projects, window, cx| {
+                            remote_server_projects.mode =
+                                Mode::CreateRemoteDevContainer(CreateRemoteDevContainer::new(
+                                    DevContainerCreationProgress::Error(format!("{e}")),
+                                    cx,
+                                ));
+                            remote_server_projects.focus_handle(cx).focus(window, cx);
+                        })
                         .ok();
-                        entity
-                            .update_in(cx, |remote_server_projects, window, cx| {
-                                remote_server_projects.mode =
-                                    Mode::CreateRemoteDevContainer(CreateRemoteDevContainer::new(
-                                        DevContainerCreationProgress::Error(format!("{e}")),
-                                        cx,
-                                    ));
-                                remote_server_projects.focus_handle(cx).focus(window, cx);
-                            })
-                            .ok();
-                        return;
-                    }
-                };
+                    return;
+                }
+            };
             entity
                 .update(cx, |_, cx| {
                     cx.emit(DismissEvent);
