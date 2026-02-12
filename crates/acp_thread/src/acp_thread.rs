@@ -492,6 +492,8 @@ pub enum ToolCallStatus {
     WaitingForConfirmation {
         options: PermissionOptions,
         respond_tx: oneshot::Sender<acp::PermissionOptionId>,
+        /// `None` for ACP agent tool calls, which aren't affected by local
+        /// Zed settings changes.
         permission_input: Option<PermissionInput>,
     },
     /// The tool call is currently running.
