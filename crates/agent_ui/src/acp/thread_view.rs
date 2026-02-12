@@ -2868,6 +2868,309 @@ pub(crate) mod tests {
     }
 
     #[gpui::test]
+    async fn test_back_navigates_across_workspaces(cx: &mut TestAppContext) {
+        init_test(cx);
+        let fs = FakeFs::new(cx.executor());
+
+        cx.update(|cx| {
+            cx.update_flags(true, vec!["agent-v2".to_string()]);
+        });
+
+        let project1 = Project::test(fs.clone(), [], cx).await;
+        let project2 = Project::test(fs.clone(), [], cx).await;
+        let project3 = Project::test(fs.clone(), [], cx).await;
+
+        // Create a MultiWorkspace window starting with workspace 1.
+        let multi_workspace_handle =
+            cx.add_window(|window, cx| MultiWorkspace::test_new(project1.clone(), window, cx));
+
+        let cx = &mut VisualTestContext::from_window(multi_workspace_handle.into(), cx);
+
+        let workspace1 = multi_workspace_handle
+            .read_with(cx, |mw, _| mw.workspace().clone())
+            .unwrap();
+
+        // --- Workspace 1: set up an AcpServerView with two threads, navigate to thread B ---
+
+        let server_view1 = {
+            let thread_store = cx.update(|_window, cx| cx.new(|cx| ThreadStore::new(cx)));
+            let history =
+                cx.update(|window, cx| cx.new(|cx| AcpThreadHistory::new(None, window, cx)));
+
+            let sv = cx.update(|window, cx| {
+                cx.new(|cx| {
+                    AcpServerView::new(
+                        Rc::new(StubAgentServer::default_response()),
+                        None,
+                        None,
+                        workspace1.downgrade(),
+                        project1.clone(),
+                        Some(thread_store),
+                        None,
+                        history,
+                        window,
+                        cx,
+                    )
+                })
+            });
+            cx.run_until_parked();
+            sv
+        };
+
+        let session_b1 = SessionId::from("ws1-thread-b");
+        server_view1.update_in(cx, |view, window, cx| {
+            let connected = view.as_connected().expect("should be connected");
+            let connection = connected.connection.clone();
+            let project = view.project.clone();
+
+            let action_log = cx.new(|_| ActionLog::new(project.clone()));
+            let thread = cx.new(|cx| {
+                AcpThread::new(
+                    None,
+                    "WS1 Thread B",
+                    connection.clone(),
+                    project.clone(),
+                    action_log,
+                    session_b1.clone(),
+                    watch::Receiver::constant(acp::PromptCapabilities::new()),
+                    cx,
+                )
+            });
+            let thread_view = view.new_thread_view(None, thread, false, None, None, window, cx);
+            let connected = view.as_connected_mut().unwrap();
+            connected.threads.insert(session_b1.clone(), thread_view);
+
+            view.navigate_to_session(session_b1.clone(), window, cx);
+        });
+
+        // Assert: only workspace 1 is active.
+        multi_workspace_handle
+            .read_with(cx, |mw, _| {
+                assert_eq!(mw.active_workspace_index(), 0);
+            })
+            .unwrap();
+
+        // --- Workspace 2: add it, set up server view with two threads ---
+
+        let workspace2 = multi_workspace_handle
+            .update(cx, |mw, window, cx| {
+                mw.test_add_workspace(project2.clone(), window, cx)
+            })
+            .unwrap();
+
+        // Assert: only workspace 2 is active.
+        multi_workspace_handle
+            .read_with(cx, |mw, _| {
+                assert_eq!(mw.active_workspace_index(), 1);
+                assert_eq!(mw.workspace(), &workspace2);
+            })
+            .unwrap();
+
+        let server_view2 = {
+            let thread_store = cx.update(|_window, cx| cx.new(|cx| ThreadStore::new(cx)));
+            let history =
+                cx.update(|window, cx| cx.new(|cx| AcpThreadHistory::new(None, window, cx)));
+
+            let sv = cx.update(|window, cx| {
+                cx.new(|cx| {
+                    AcpServerView::new(
+                        Rc::new(StubAgentServer::default_response()),
+                        None,
+                        None,
+                        workspace2.downgrade(),
+                        project2.clone(),
+                        Some(thread_store),
+                        None,
+                        history,
+                        window,
+                        cx,
+                    )
+                })
+            });
+            cx.run_until_parked();
+            sv
+        };
+
+        let session_b2 = SessionId::from("ws2-thread-b");
+        server_view2.update_in(cx, |view, window, cx| {
+            let connected = view.as_connected().expect("should be connected");
+            let connection = connected.connection.clone();
+            let project = view.project.clone();
+
+            let action_log = cx.new(|_| ActionLog::new(project.clone()));
+            let thread = cx.new(|cx| {
+                AcpThread::new(
+                    None,
+                    "WS2 Thread B",
+                    connection.clone(),
+                    project.clone(),
+                    action_log,
+                    session_b2.clone(),
+                    watch::Receiver::constant(acp::PromptCapabilities::new()),
+                    cx,
+                )
+            });
+            let thread_view = view.new_thread_view(None, thread, false, None, None, window, cx);
+            let connected = view.as_connected_mut().unwrap();
+            connected.threads.insert(session_b2.clone(), thread_view);
+
+            view.navigate_to_session(session_b2.clone(), window, cx);
+        });
+
+        // --- Workspace 3: add it, set up server view with two threads ---
+
+        let workspace3 = multi_workspace_handle
+            .update(cx, |mw, window, cx| {
+                mw.test_add_workspace(project3.clone(), window, cx)
+            })
+            .unwrap();
+
+        // Assert: only workspace 3 is active.
+        multi_workspace_handle
+            .read_with(cx, |mw, _| {
+                assert_eq!(mw.active_workspace_index(), 2);
+                assert_eq!(mw.workspace(), &workspace3);
+            })
+            .unwrap();
+
+        let server_view3 = {
+            let thread_store = cx.update(|_window, cx| cx.new(|cx| ThreadStore::new(cx)));
+            let history =
+                cx.update(|window, cx| cx.new(|cx| AcpThreadHistory::new(None, window, cx)));
+
+            let sv = cx.update(|window, cx| {
+                cx.new(|cx| {
+                    AcpServerView::new(
+                        Rc::new(StubAgentServer::default_response()),
+                        None,
+                        None,
+                        workspace3.downgrade(),
+                        project3.clone(),
+                        Some(thread_store),
+                        None,
+                        history,
+                        window,
+                        cx,
+                    )
+                })
+            });
+            cx.run_until_parked();
+            sv
+        };
+
+        let session_b3 = SessionId::from("ws3-thread-b");
+        server_view3.update_in(cx, |view, window, cx| {
+            let connected = view.as_connected().expect("should be connected");
+            let connection = connected.connection.clone();
+            let project = view.project.clone();
+
+            let action_log = cx.new(|_| ActionLog::new(project.clone()));
+            let thread = cx.new(|cx| {
+                AcpThread::new(
+                    None,
+                    "WS3 Thread B",
+                    connection.clone(),
+                    project.clone(),
+                    action_log,
+                    session_b3.clone(),
+                    watch::Receiver::constant(acp::PromptCapabilities::new()),
+                    cx,
+                )
+            });
+            let thread_view = view.new_thread_view(None, thread, false, None, None, window, cx);
+            let connected = view.as_connected_mut().unwrap();
+            connected.threads.insert(session_b3.clone(), thread_view);
+
+            view.navigate_to_session(session_b3.clone(), window, cx);
+        });
+
+        // We're now in workspace 3, on Thread B3.
+        // Each workspace has session history: [Thread A] -> Thread B (active).
+        // The workspace backward stack is [0, 1] (from activating ws2 then ws3).
+        //
+        // The server_views array maps workspace index → server view:
+        let server_views = [&server_view1, &server_view2, &server_view3];
+
+        // Helper: simulate pressing Back. Tries thread-level go_back first;
+        // if that's exhausted, falls through to workspace-level go_back_workspace.
+        // This is the same logic as the GoBack action handler in AcpThreadView.
+        let simulate_back = |server_views: &[&Entity<AcpServerView>],
+                             multi_workspace_handle: gpui::WindowHandle<MultiWorkspace>,
+                             cx: &mut VisualTestContext| {
+            let active_index = multi_workspace_handle
+                .read_with(cx, |mw, _| mw.active_workspace_index())
+                .unwrap();
+            let server_view = server_views[active_index];
+
+            let navigated = server_view.update_in(cx, |view, window, cx| view.go_back(window, cx));
+
+            if !navigated {
+                multi_workspace_handle
+                    .update(cx, |mw, window, cx| {
+                        mw.go_back_workspace(window, cx);
+                    })
+                    .unwrap();
+            }
+        };
+
+        // --- Press Back from workspace 3 until we reach workspace 2 ---
+
+        // Back 1: Thread B3 → Thread A3 (within workspace 3's session history).
+        simulate_back(&server_views, multi_workspace_handle, cx);
+        multi_workspace_handle
+            .read_with(cx, |mw, _| {
+                assert_eq!(
+                    mw.active_workspace_index(),
+                    2,
+                    "Should still be in workspace 3 after navigating within thread history"
+                );
+            })
+            .unwrap();
+
+        // Back 2: Thread A3 has no more session history → falls through to
+        // workspace switching → workspace 2.
+        simulate_back(&server_views, multi_workspace_handle, cx);
+        multi_workspace_handle
+            .read_with(cx, |mw, _| {
+                assert_eq!(
+                    mw.active_workspace_index(),
+                    1,
+                    "Should have navigated back to workspace 2"
+                );
+                assert_eq!(mw.workspace(), &workspace2);
+            })
+            .unwrap();
+
+        // --- Press Back from workspace 2 until we reach workspace 1 ---
+
+        // Back 3: Thread B2 → Thread A2 (within workspace 2's session history).
+        simulate_back(&server_views, multi_workspace_handle, cx);
+        multi_workspace_handle
+            .read_with(cx, |mw, _| {
+                assert_eq!(
+                    mw.active_workspace_index(),
+                    1,
+                    "Should still be in workspace 2 after navigating within thread history"
+                );
+            })
+            .unwrap();
+
+        // Back 4: Thread A2 has no more session history → falls through to
+        // workspace switching → workspace 1.
+        simulate_back(&server_views, multi_workspace_handle, cx);
+        multi_workspace_handle
+            .read_with(cx, |mw, _| {
+                assert_eq!(
+                    mw.active_workspace_index(),
+                    0,
+                    "Should have navigated back to workspace 1"
+                );
+                assert_eq!(mw.workspace(), &workspace1);
+            })
+            .unwrap();
+    }
+
+    #[gpui::test]
     async fn test_notification_for_stop_event(cx: &mut TestAppContext) {
         init_test(cx);
 
