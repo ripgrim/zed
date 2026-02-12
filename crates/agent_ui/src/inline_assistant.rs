@@ -27,7 +27,7 @@ use editor::SelectionEffects;
 use editor::scroll::ScrollOffset;
 use editor::{
     Anchor, AnchorRangeExt, CodeActionProvider, Editor, EditorEvent, ExcerptId, ExcerptRange,
-    MultiBuffer, MultiBufferSnapshot, ToOffset as _, ToPoint,
+    HighlightKey, MultiBuffer, MultiBufferSnapshot, ToOffset as _, ToPoint,
     actions::SelectAll,
     display_map::{
         BlockContext, BlockPlacement, BlockProperties, BlockStyle, CustomBlockId, EditorMargins,
@@ -52,7 +52,9 @@ use terminal_view::{TerminalView, terminal_panel::TerminalPanel};
 use text::{OffsetRangeExt, ToPoint as _};
 use ui::prelude::*;
 use util::{RangeExt, ResultExt, maybe};
-use workspace::{ItemHandle, Toast, Workspace, dock::Panel, notifications::NotificationId};
+use workspace::{
+    ItemHandle, NotificationSource, Toast, Workspace, dock::Panel, notifications::NotificationId,
+};
 use zed_actions::agent::OpenSettings;
 
 pub fn init(fs: Arc<dyn Fs>, prompt_builder: Arc<PromptBuilder>, cx: &mut App) {
@@ -1432,9 +1434,10 @@ impl InlineAssistant {
             }
 
             if foreground_ranges.is_empty() {
-                editor.clear_highlights::<InlineAssist>(cx);
+                editor.clear_highlights(HighlightKey::InlineAssist, cx);
             } else {
-                editor.highlight_text::<InlineAssist>(
+                editor.highlight_text(
+                    HighlightKey::InlineAssist,
                     foreground_ranges,
                     HighlightStyle {
                         fade_out: Some(0.6),
@@ -1834,7 +1837,11 @@ impl InlineAssist {
                                         assist_id.0,
                                     );
 
-                                    workspace.show_toast(Toast::new(id, error), cx);
+                                    workspace.show_toast(
+                                        Toast::new(id, error),
+                                        NotificationSource::Agent,
+                                        cx,
+                                    );
                                 })
                             } else {
                                 #[cfg(any(test, feature = "test-support"))]

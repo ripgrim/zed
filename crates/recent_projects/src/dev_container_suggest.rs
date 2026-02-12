@@ -1,19 +1,26 @@
 use db::kvp::KEY_VALUE_STORE;
+use dev_container::find_configs_in_snapshot;
 use gpui::{SharedString, Window};
 use project::{Project, WorktreeId};
 use std::sync::LazyLock;
 use ui::prelude::*;
 use util::rel_path::RelPath;
 use workspace::Workspace;
-use workspace::notifications::NotificationId;
 use workspace::notifications::simple_message_notification::MessageNotification;
+use workspace::notifications::{NotificationId, NotificationSource};
 use worktree::UpdatedEntriesSet;
 
 const DEV_CONTAINER_SUGGEST_KEY: &str = "dev_container_suggest_dismissed";
 
-fn devcontainer_path() -> &'static RelPath {
+fn devcontainer_dir_path() -> &'static RelPath {
     static PATH: LazyLock<&'static RelPath> =
         LazyLock::new(|| RelPath::unix(".devcontainer").expect("valid path"));
+    *PATH
+}
+
+fn devcontainer_json_path() -> &'static RelPath {
+    static PATH: LazyLock<&'static RelPath> =
+        LazyLock::new(|| RelPath::unix(".devcontainer.json").expect("valid path"));
     *PATH
 }
 
@@ -28,9 +35,9 @@ pub fn suggest_on_worktree_updated(
     window: &mut Window,
     cx: &mut Context<Workspace>,
 ) {
-    let devcontainer_updated = updated_entries
-        .iter()
-        .any(|(path, _, _)| path.as_ref() == devcontainer_path());
+    let devcontainer_updated = updated_entries.iter().any(|(path, _, _)| {
+        path.as_ref() == devcontainer_dir_path() || path.as_ref() == devcontainer_json_path()
+    });
 
     if !devcontainer_updated {
         return;
@@ -46,11 +53,7 @@ pub fn suggest_on_worktree_updated(
         return;
     }
 
-    let has_devcontainer = worktree
-        .entry_for_path(devcontainer_path())
-        .is_some_and(|entry| entry.is_dir());
-
-    if !has_devcontainer {
+    if find_configs_in_snapshot(worktree).is_empty() {
         return;
     }
 
@@ -75,7 +78,7 @@ pub fn suggest_on_worktree_updated(
             SharedString::from(project_path.clone()),
         );
 
-        workspace.show_notification(notification_id, cx, |cx| {
+        workspace.show_notification(notification_id, NotificationSource::DevContainer, cx, |cx| {
             cx.new(move |cx| {
                 MessageNotification::new(
                     "This project contains a Dev Container configuration file. Would you like to re-open it in a container?",

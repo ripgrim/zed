@@ -84,7 +84,8 @@ use util::{ResultExt, asset_str, maybe};
 use uuid::Uuid;
 use vim_mode_setting::VimModeSetting;
 use workspace::notifications::{
-    NotificationId, SuppressEvent, dismiss_app_notification, show_app_notification,
+    NotificationId, NotificationSource, SuppressEvent, dismiss_app_notification,
+    show_app_notification,
 };
 use workspace::utility_pane::utility_slot_for_dock_position;
 use workspace::{
@@ -123,6 +124,8 @@ actions!(
         OpenTasks,
         /// Opens debug tasks configuration.
         OpenDebugTasks,
+        /// Shows the default semantic token rules (read-only).
+        ShowDefaultSemanticTokenRules,
         /// Resets the application database.
         ResetDatabase,
         /// Shows all hidden windows.
@@ -237,6 +240,18 @@ pub fn init(cx: &mut App) {
             open_settings_file(
                 paths::debug_scenarios_file(),
                 || settings::initial_debug_tasks_content().as_ref().into(),
+                window,
+                cx,
+            );
+        });
+    })
+    .on_action(|_: &ShowDefaultSemanticTokenRules, cx| {
+        with_active_or_new_workspace(cx, |workspace, window, cx| {
+            open_bundled_file(
+                workspace,
+                settings::default_semantic_token_rules(),
+                "Default Semantic Token Rules",
+                "JSONC",
                 window,
                 cx,
             );
@@ -398,16 +413,12 @@ pub fn initialize_workspace(
             }
         }
 
-        #[cfg(target_os = "windows")]
-        unstable_version_notification(cx);
-
         let edit_prediction_menu_handle = PopoverMenuHandle::default();
         let edit_prediction_ui = cx.new(|cx| {
             edit_prediction_ui::EditPredictionButton::new(
                 app_state.fs.clone(),
                 app_state.user_store.clone(),
                 edit_prediction_menu_handle.clone(),
-                app_state.client.clone(),
                 workspace.project().clone(),
                 cx,
             )
@@ -481,53 +492,6 @@ pub fn initialize_workspace(
         workspace.focus_handle(cx).focus(window, cx);
     })
     .detach();
-}
-
-#[cfg(target_os = "windows")]
-fn unstable_version_notification(cx: &mut App) {
-    if !matches!(
-        ReleaseChannel::try_global(cx),
-        Some(ReleaseChannel::Nightly)
-    ) {
-        return;
-    }
-    let db_key = "zed_windows_nightly_notif_shown_at".to_owned();
-    let time = chrono::Utc::now();
-    if let Some(last_shown) = db::kvp::KEY_VALUE_STORE
-        .read_kvp(&db_key)
-        .log_err()
-        .flatten()
-        .and_then(|timestamp| chrono::DateTime::parse_from_rfc3339(&timestamp).ok())
-    {
-        if time.fixed_offset() - last_shown < chrono::Duration::days(7) {
-            return;
-        }
-    }
-    cx.spawn(async move |_| {
-        db::kvp::KEY_VALUE_STORE
-            .write_kvp(db_key, time.to_rfc3339())
-            .await
-    })
-    .detach_and_log_err(cx);
-    struct WindowsNightly;
-    show_app_notification(NotificationId::unique::<WindowsNightly>(), cx, |cx| {
-        cx.new(|cx| {
-            MessageNotification::new("You're using an unstable version of Zed (Nightly)", cx)
-                .primary_message("Download Stable")
-                .primary_icon_color(Color::Accent)
-                .primary_icon(IconName::Download)
-                .primary_on_click(|window, cx| {
-                    window.dispatch_action(
-                        zed_actions::OpenBrowser {
-                            url: "https://zed.dev/download".to_string(),
-                        }
-                        .boxed_clone(),
-                        cx,
-                    );
-                    cx.emit(DismissEvent);
-                })
-        })
-    });
 }
 
 #[cfg(any(target_os = "linux", target_os = "freebsd"))]
@@ -840,6 +804,7 @@ fn register_actions(
                             "Opening this URL in a browser failed because the URL is invalid: {}\n\nError was: {e}",
                             action.url
                         ),
+                        NotificationSource::System,
                         cx,
                     );
                 }
@@ -1036,6 +1001,7 @@ fn register_actions(
                                 ReleaseChannel::global(cx).display_name()
                             ),
                         ),
+                        NotificationSource::Cli,
                         cx,
                     )
                 })?;
@@ -1267,6 +1233,9 @@ fn initialize_pane(
             toolbar.add_item(telemetry_log_item, window, cx);
             let syntax_tree_item = cx.new(|_| language_tools::SyntaxTreeToolbarItemView::new());
             toolbar.add_item(syntax_tree_item, window, cx);
+            let highlights_tree_item =
+                cx.new(|_| language_tools::HighlightsTreeToolbarItemView::new());
+            toolbar.add_item(highlights_tree_item, window, cx);
             let migration_banner = cx.new(|cx| MigrationBanner::new(workspace, cx));
             toolbar.add_item(migration_banner, window, cx);
             let project_diff_toolbar = cx.new(|cx| ProjectDiffToolbar::new(workspace, cx));
@@ -1444,6 +1413,7 @@ fn open_log_file(workspace: &mut Workspace, window: &mut Window, cx: &mut Contex
                     .update(cx, |workspace, cx| {
                         workspace.show_notification(
                             NotificationId::unique::<OpenLogError>(),
+                            NotificationSource::System,
                             cx,
                             |cx| {
                                 cx.new(|cx| {
@@ -1528,7 +1498,7 @@ fn notify_settings_errors(result: settings::SettingsParseResult, is_user: bool, 
                 false
                 // Local settings errors are displayed by the projects
             } else {
-                show_app_notification(id, cx, move |cx| {
+                show_app_notification(id, NotificationSource::Settings, cx, move |cx| {
                     cx.new(|cx| {
                         MessageNotification::new(format!("Invalid user settings file\n{error}"), cx)
                             .primary_message("Open Settings File")
@@ -1558,7 +1528,7 @@ fn notify_settings_errors(result: settings::SettingsParseResult, is_user: bool, 
         }
         settings::MigrationStatus::Failed { error: err } => {
             if !showed_parse_error {
-                show_app_notification(id, cx, move |cx| {
+                show_app_notification(id, NotificationSource::Settings, cx, move |cx| {
                     cx.new(|cx| {
                         MessageNotification::new(
                             format!(
@@ -1764,17 +1734,22 @@ fn show_keymap_file_json_error(
 ) {
     let message: SharedString =
         format!("JSON parse error in keymap file. Bindings not reloaded.\n\n{error}").into();
-    show_app_notification(notification_id, cx, move |cx| {
-        cx.new(|cx| {
-            MessageNotification::new(message.clone(), cx)
-                .primary_message("Open Keymap File")
-                .primary_icon(IconName::Settings)
-                .primary_on_click(|window, cx| {
-                    window.dispatch_action(zed_actions::OpenKeymapFile.boxed_clone(), cx);
-                    cx.emit(DismissEvent);
-                })
-        })
-    });
+    show_app_notification(
+        notification_id,
+        NotificationSource::Settings,
+        cx,
+        move |cx| {
+            cx.new(|cx| {
+                MessageNotification::new(message.clone(), cx)
+                    .primary_message("Open Keymap File")
+                    .primary_icon(IconName::Settings)
+                    .primary_on_click(|window, cx| {
+                        window.dispatch_action(zed_actions::OpenKeymapFile.boxed_clone(), cx);
+                        cx.emit(DismissEvent);
+                    })
+            })
+        },
+    );
 }
 
 fn show_keymap_file_load_error(
@@ -1819,29 +1794,34 @@ fn show_markdown_app_notification<F>(
         let primary_button_message = primary_button_message.clone();
         let primary_button_on_click = Arc::new(primary_button_on_click);
         cx.update(|cx| {
-            show_app_notification(notification_id, cx, move |cx| {
-                let workspace_handle = cx.entity().downgrade();
-                let parsed_markdown = parsed_markdown.clone();
-                let primary_button_message = primary_button_message.clone();
-                let primary_button_on_click = primary_button_on_click.clone();
-                cx.new(move |cx| {
-                    MessageNotification::new_from_builder(cx, move |window, cx| {
-                        image_cache(retain_all("notification-cache"))
-                            .child(div().text_ui(cx).child(
-                                markdown_preview::markdown_renderer::render_parsed_markdown(
-                                    &parsed_markdown.clone(),
-                                    Some(workspace_handle.clone()),
-                                    window,
-                                    cx,
-                                ),
-                            ))
-                            .into_any()
+            show_app_notification(
+                notification_id,
+                NotificationSource::Settings,
+                cx,
+                move |cx| {
+                    let workspace_handle = cx.entity().downgrade();
+                    let parsed_markdown = parsed_markdown.clone();
+                    let primary_button_message = primary_button_message.clone();
+                    let primary_button_on_click = primary_button_on_click.clone();
+                    cx.new(move |cx| {
+                        MessageNotification::new_from_builder(cx, move |window, cx| {
+                            image_cache(retain_all("notification-cache"))
+                                .child(div().text_ui(cx).child(
+                                    markdown_preview::markdown_renderer::render_parsed_markdown(
+                                        &parsed_markdown.clone(),
+                                        Some(workspace_handle.clone()),
+                                        window,
+                                        cx,
+                                    ),
+                                ))
+                                .into_any()
+                        })
+                        .primary_message(primary_button_message)
+                        .primary_icon(IconName::Settings)
+                        .primary_on_click_arc(primary_button_on_click)
                     })
-                    .primary_message(primary_button_message)
-                    .primary_icon(IconName::Settings)
-                    .primary_on_click_arc(primary_button_on_click)
-                })
-            })
+                },
+            )
         });
     })
     .detach();
@@ -2041,9 +2021,12 @@ fn open_local_file(
     } else {
         struct NoOpenFolders;
 
-        workspace.show_notification(NotificationId::unique::<NoOpenFolders>(), cx, |cx| {
-            cx.new(|cx| MessageNotification::new("This project has no folders open.", cx))
-        })
+        workspace.show_notification(
+            NotificationId::unique::<NoOpenFolders>(),
+            NotificationSource::Project,
+            cx,
+            |cx| cx.new(|cx| MessageNotification::new("This project has no folders open.", cx)),
+        )
     }
 }
 
@@ -2218,6 +2201,7 @@ fn capture_recent_audio(workspace: &mut Workspace, _: &mut Window, cx: &mut Cont
 
     workspace.show_notification(
         NotificationId::unique::<CaptureRecentAudioNotification>(),
+        NotificationSource::System,
         cx,
         |cx| cx.new(CaptureRecentAudioNotification::new),
     );
@@ -2397,7 +2381,7 @@ mod tests {
             .fs
             .as_fake()
             .insert_tree(
-                "/root",
+                path!("/root"),
                 json!({
                     "a": {
                         "aa": null,
@@ -2425,7 +2409,10 @@ mod tests {
 
         cx.update(|cx| {
             open_paths(
-                &[PathBuf::from("/root/a"), PathBuf::from("/root/b")],
+                &[
+                    PathBuf::from(path!("/root/a")),
+                    PathBuf::from(path!("/root/b")),
+                ],
                 app_state.clone(),
                 workspace::OpenOptions::default(),
                 cx,
@@ -2437,7 +2424,7 @@ mod tests {
 
         cx.update(|cx| {
             open_paths(
-                &[PathBuf::from("/root/a")],
+                &[PathBuf::from(path!("/root/a"))],
                 app_state.clone(),
                 workspace::OpenOptions::default(),
                 cx,
@@ -2466,7 +2453,10 @@ mod tests {
 
         cx.update(|cx| {
             open_paths(
-                &[PathBuf::from("/root/c"), PathBuf::from("/root/d")],
+                &[
+                    PathBuf::from(path!("/root/c")),
+                    PathBuf::from(path!("/root/d")),
+                ],
                 app_state.clone(),
                 workspace::OpenOptions::default(),
                 cx,
@@ -2482,7 +2472,7 @@ mod tests {
             .unwrap();
         cx.update(|cx| {
             open_paths(
-                &[PathBuf::from("/root/e")],
+                &[PathBuf::from(path!("/root/e"))],
                 app_state,
                 workspace::OpenOptions {
                     replace_window: Some(window),
@@ -2505,7 +2495,7 @@ mod tests {
                         .worktrees(cx)
                         .map(|w| w.read(cx).abs_path())
                         .collect::<Vec<_>>(),
-                    &[Path::new("/root/e").into()]
+                    &[Path::new(path!("/root/e")).into()]
                 );
                 assert!(workspace.left_dock().read(cx).is_open());
                 assert!(workspace.active_pane().focus_handle(cx).is_focused(window));
@@ -2846,9 +2836,9 @@ mod tests {
                 editor.update(cx, |editor, cx| editor.insert("EDIT", window, cx));
             })
             .unwrap();
+        cx.run_until_parked();
 
         assert!(window_is_edited(window, cx));
-        cx.run_until_parked();
 
         // Advance the clock to make sure the workspace is serialized
         cx.executor().advance_clock(Duration::from_secs(1));
@@ -4826,13 +4816,16 @@ mod tests {
                 "diagnostics",
                 "edit_prediction",
                 "editor",
+                "encoding_selector",
                 "feedback",
                 "file_finder",
                 "git",
+                "git_graph",
                 "git_onboarding",
                 "git_panel",
                 "git_picker",
                 "go_to_line",
+                "highlights_tree_view",
                 "icon_theme_selector",
                 "image_viewer",
                 "inline_assistant",
@@ -5025,6 +5018,7 @@ mod tests {
             language_model::init(app_state.client.clone(), cx);
             language_models::init(app_state.user_store.clone(), app_state.client.clone(), cx);
             web_search::init(cx);
+            git_graph::init(cx);
             web_search_providers::init(app_state.client.clone(), cx);
             let prompt_builder = PromptBuilder::load(app_state.fs.clone(), false, cx);
             project::AgentRegistryStore::init_global(cx);
@@ -5047,6 +5041,16 @@ mod tests {
             debugger_ui::init(cx);
             initialize_workspace(app_state.clone(), prompt_builder, cx);
             search::init(cx);
+            cx.set_global(workspace::PaneSearchBarCallbacks {
+                setup_search_bar: |languages, toolbar, window, cx| {
+                    let search_bar =
+                        cx.new(|cx| search::BufferSearchBar::new(languages, window, cx));
+                    toolbar.update(cx, |toolbar, cx| {
+                        toolbar.add_item(search_bar, window, cx);
+                    });
+                },
+                wrap_div_with_search_actions: search::buffer_search::register_pane_search_actions,
+            });
             app_state
         })
     }
@@ -5255,7 +5259,7 @@ mod tests {
 
             cx.update(|cx| {
                 let open_options = OpenOptions {
-                    prefer_focused_window: true,
+                    wait: true,
                     ..Default::default()
                 };
 

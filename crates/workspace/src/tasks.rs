@@ -5,10 +5,15 @@ use gpui::{AppContext, Context, Entity, Task};
 use language::Buffer;
 use project::{TaskSourceKind, WorktreeId};
 use remote::ConnectionState;
-use task::{DebugScenario, ResolvedTask, SpawnInTerminal, TaskContext, TaskTemplate};
+use task::{
+    DebugScenario, ResolvedTask, SharedTaskContext, SpawnInTerminal, TaskContext, TaskTemplate,
+};
 use ui::Window;
 
-use crate::{Toast, Workspace, notifications::NotificationId};
+use crate::{
+    Toast, Workspace,
+    notifications::{NotificationId, NotificationSource},
+};
 
 impl Workspace {
     pub fn schedule_task(
@@ -88,7 +93,11 @@ impl Workspace {
                         log::error!("Task spawn failed: {e:#}");
                         _ = w.update(cx, |w, cx| {
                             let id = NotificationId::unique::<ResolvedTask>();
-                            w.show_toast(Toast::new(id, format!("Task spawn failed: {e}")), cx);
+                            w.show_toast(
+                                Toast::new(id, format!("Task spawn failed: {e}")),
+                                NotificationSource::Task,
+                                cx,
+                            );
                         })
                     }
                     None => log::debug!("Task spawn got cancelled"),
@@ -101,7 +110,7 @@ impl Workspace {
     pub fn start_debug_session(
         &mut self,
         scenario: DebugScenario,
-        task_context: TaskContext,
+        task_context: SharedTaskContext,
         active_buffer: Option<Entity<Buffer>>,
         worktree_id: Option<WorktreeId>,
         window: &mut Window,
