@@ -24,6 +24,7 @@ use std::{
         Arc,
         atomic::{AtomicUsize, Ordering::SeqCst},
     },
+    time::Duration,
 };
 use sum_tree::{Bias, ContextLessSummary, Dimensions, SumTree, TreeMap};
 use text::{BufferId, Edit};
@@ -707,6 +708,7 @@ impl BlockMap {
         }
     }
 
+    // Warning: doesn't sync the block map, use advisedly
     pub(crate) fn insert_block_raw(
         &mut self,
         block: BlockProperties<Anchor>,
@@ -732,6 +734,20 @@ impl BlockMap {
         id
     }
 
+    // Warning: doesn't sync the block map, use advisedly
+    pub(crate) fn retain_blocks_raw(&mut self, mut pred: impl FnMut(&Arc<CustomBlock>) -> bool) {
+        let mut ids_to_remove = HashSet::default();
+        self.custom_blocks.retain(|block| {
+            let keep = pred(block);
+            if !keep {
+                ids_to_remove.insert(block.id);
+            }
+            keep
+        });
+        self.custom_blocks_by_id
+            .retain(|id, _| !ids_to_remove.contains(id));
+    }
+
     #[ztracing::instrument(skip_all, fields(edits = ?edits))]
     fn sync(
         &self,
@@ -739,6 +755,29 @@ impl BlockMap {
         mut edits: WrapPatch,
         companion_view: Option<CompanionView>,
     ) {
+        let is_left = if let Some(companion) = companion_view {
+            if companion.companion.is_rhs(companion.display_map_id) {
+                Some(false)
+            } else {
+                Some(true)
+            }
+        } else {
+            None
+        };
+        let _timer = zlog::time!("blockmap sync")
+            .warn_if_gt(Duration::from_millis(100))
+            .if_longer(move |_duration| {
+                if let Some(is_left) = is_left {
+                    if is_left {
+                        zlog::warn!("LHS");
+                    } else {
+                        zlog::warn!("RHS");
+                    }
+                }
+                let backtrace = std::backtrace::Backtrace::force_capture();
+                zlog::warn!("{backtrace:#?}");
+            });
+
         let buffer = wrap_snapshot.buffer_snapshot();
 
         // Handle changing the last excerpt if it is empty.
@@ -841,6 +880,9 @@ impl BlockMap {
         if edits.is_empty() {
             return;
         }
+
+        let _timer = zlog::time!("block map sync: {edits:?}")
+            .warn_if_gt(std::time::Duration::from_millis(100));
 
         let mut transforms = self.transforms.borrow_mut();
         let mut new_transforms = SumTree::default();

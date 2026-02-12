@@ -44,6 +44,7 @@ impl LinkedEditingRanges {
 const UPDATE_DEBOUNCE: Duration = Duration::from_millis(50);
 
 // TODO do not refresh anything at all, if the settings/capabilities do not have it enabled.
+#[ztracing::instrument(skip_all)]
 pub(super) fn refresh_linked_ranges(
     editor: &mut Editor,
     window: &mut Window,

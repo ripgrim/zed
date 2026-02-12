@@ -6,6 +6,7 @@ pub mod filter;
 pub mod sink;
 
 pub use sink::{flush, init_output_file, init_output_stderr, init_output_stdout};
+use std::time::Duration;
 
 pub const SCOPE_DEPTH_MAX: usize = 4;
 
@@ -323,7 +324,8 @@ pub struct Timer {
     pub logger: Logger,
     pub start_time: std::time::Instant,
     pub name: &'static str,
-    pub warn_if_longer_than: Option<std::time::Duration>,
+    pub warn_if_longer_than: Option<Duration>,
+    pub on_longer: Option<Box<dyn FnMut(Duration)>>,
     pub done: bool,
 }
 
@@ -341,12 +343,23 @@ impl Timer {
             name,
             start_time: std::time::Instant::now(),
             warn_if_longer_than: None,
+            on_longer: None,
             done: false,
         }
     }
 
-    pub fn warn_if_gt(mut self, warn_limit: std::time::Duration) -> Self {
+    pub fn warn_if_gt(mut self, warn_limit: Duration) -> Self {
         self.warn_if_longer_than = Some(warn_limit);
+        self
+    }
+
+    #[track_caller]
+    pub fn if_longer(mut self, on_longer: impl FnMut(Duration) + 'static) -> Self {
+        assert!(
+            self.warn_if_longer_than.is_some(),
+            "cannot set `if_longer` without also setting `warn_if_gt`"
+        );
+        self.on_longer = Some(Box::new(on_longer));
         self
     }
 
@@ -369,6 +382,11 @@ impl Timer {
                 elapsed,
                 warn_limit
             );
+
+            if let Some(on_longer) = &mut self.on_longer {
+                on_longer(elapsed);
+            }
+
             self.done = true;
             return;
         }

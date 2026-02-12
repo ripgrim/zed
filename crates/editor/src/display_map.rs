@@ -474,11 +474,13 @@ impl DisplayMap {
     }
 
     // TODO(split-diff) figure out how to free the LHS from having to build a block map before this is called
+    #[instrument(skip_all)]
     pub(crate) fn set_companion(
         &mut self,
         companion: Option<(Entity<DisplayMap>, Entity<Companion>)>,
         cx: &mut Context<Self>,
     ) {
+        log::warn!(">>>>>>>> start set companion");
         let this = cx.weak_entity();
         // Reverting to no companion, recompute the block map to clear spacers
         // and balancing blocks.
@@ -504,7 +506,33 @@ impl DisplayMap {
         };
         assert_eq!(self.entity_id, companion.read(cx).rhs_display_map_id);
 
-        let snapshot = self.unfold_intersecting([Anchor::min()..Anchor::max()], true, cx);
+        // FIXME just remove the raw folds from the fold map and the block map,
+        // the block_map.read further
+        // let snapshot = self.unfold_intersecting([Anchor::min()..Anchor::max()], true, cx);
+
+        // Note, throwing away the wrap edits because we're going to recompute the maximal range for the block map regardless
+        let snapshot = {
+            let edits = self.buffer_subscription.consume();
+            let snapshot = self.buffer.read(cx).snapshot(cx);
+            let tab_size = Self::tab_size(&self.buffer, cx);
+            let (snapshot, edits) = self.inlay_map.sync(snapshot, edits.into_inner());
+            let (mut writer, snapshot, edits) = self.fold_map.write(snapshot, edits);
+            let (snapshot, edits) = self.tab_map.sync(snapshot, edits, tab_size);
+            let (_snapshot, _edits) = self
+                .wrap_map
+                .update(cx, |wrap_map, cx| wrap_map.sync(snapshot, edits, cx));
+
+            let (snapshot, edits) =
+                writer.unfold_intersecting([Anchor::min()..Anchor::max()], true);
+            let (snapshot, edits) = self.tab_map.sync(snapshot, edits, tab_size);
+            let (snapshot, _edits) = self
+                .wrap_map
+                .update(cx, |wrap_map, cx| wrap_map.sync(snapshot, edits, cx));
+
+            self.block_map
+                .retain_blocks_raw(|block| !matches!(block.placement, BlockPlacement::Replace(_)));
+            snapshot
+        };
 
         let (companion_wrap_snapshot, companion_wrap_edits) =
             companion_display_map.update(cx, |dm, cx| dm.sync_through_wrap(cx));
@@ -575,6 +603,7 @@ impl DisplayMap {
         });
 
         self.companion = Some((companion_display_map.downgrade(), companion));
+        log::warn!("<<<<<<<<<< end set companion");
     }
 
     pub(crate) fn companion(&self) -> Option<&Entity<Companion>> {
@@ -593,6 +622,7 @@ impl DisplayMap {
             .copied()
     }
 
+    #[instrument(skip_all)]
     fn sync_through_wrap(&mut self, cx: &mut App) -> (WrapSnapshot, WrapPatch) {
         let tab_size = Self::tab_size(&self.buffer, cx);
         let buffer_snapshot = self.buffer.read(cx).snapshot(cx);
@@ -605,6 +635,7 @@ impl DisplayMap {
             .update(cx, |map, cx| map.sync(snapshot, edits, cx))
     }
 
+    #[instrument(skip_all)]
     fn with_synced_companion_mut<R>(
         display_map_id: EntityId,
         companion: &Option<(WeakEntity<DisplayMap>, Entity<Companion>)>,
@@ -647,6 +678,8 @@ impl DisplayMap {
                 .update(cx, |dm, cx| dm.sync_through_wrap(cx))
                 .ok()
         });
+        let _timer = zlog::time!("display map snapshot {self_wrap_edits:?}")
+            .warn_if_gt(std::time::Duration::from_millis(100));
         let companion_ref = self.companion.as_ref().map(|(_, c)| c.read(cx));
         let companion_view = companion_wrap_data.as_ref().zip(companion_ref).map(
             |((snapshot, edits), companion)| {
@@ -705,6 +738,7 @@ impl DisplayMap {
         }
     }
 
+    #[instrument(skip_all)]
     fn snapshot_simple(&mut self, cx: &mut Context<Self>) -> DisplaySnapshot {
         let (wrap_snapshot, wrap_edits) = self.sync_through_wrap(cx);
 

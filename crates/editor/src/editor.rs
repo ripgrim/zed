@@ -3490,6 +3490,7 @@ impl Editor {
         self.use_modal_editing
     }
 
+    #[ztracing::instrument(skip_all)]
     fn selections_did_change(
         &mut self,
         local: bool,
