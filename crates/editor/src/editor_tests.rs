@@ -9033,6 +9033,7 @@ async fn test_undo_edit_prediction_scrolls_to_edit_pos(cx: &mut TestAppContext) 
                 id: None,
                 edits: vec![(edit_position..edit_position, "X".into())],
                 cursor_position: None,
+                tabstop_selections: vec![],
                 edit_preview: None,
             }))
         })

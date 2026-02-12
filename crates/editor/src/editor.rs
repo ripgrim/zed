@@ -8020,13 +8020,16 @@ impl Editor {
                             fallback_cursor_target
                         };
 
-                        // Build tabstop ranges from the predicted selections
+                        // Build tabstop ranges from the predicted selections,
+                        // with a final "exit" tabstop at the cursor position so
+                        // that Tab on the last selection collapses the cursor
+                        // instead of indenting.
                         let tabstop_ranges: Vec<Vec<Range<Anchor>>> =
                             if tabstop_selections.is_empty() {
                                 Vec::new()
                             } else {
                                 let snapshot = self.buffer.read(cx).snapshot(cx);
-                                tabstop_selections
+                                let mut ranges: Vec<Vec<Range<Anchor>>> = tabstop_selections
                                     .iter()
                                     .map(|(start_anchor, start_offset, end_anchor, end_offset)| {
                                         let start_base = start_anchor.to_offset(&snapshot).0;
@@ -8041,7 +8044,9 @@ impl Editor {
                                         let end = snapshot.anchor_before(end_pos);
                                         vec![start..end]
                                     })
-                                    .collect()
+                                    .collect();
+                                ranges.push(vec![cursor_target..cursor_target]);
+                                ranges
                             };
 
                         // If we have tabstops, select the first one; otherwise use cursor_target
@@ -8062,10 +8067,11 @@ impl Editor {
                                 range.start.to_offset(&snapshot) != range.end.to_offset(&snapshot)
                             };
                             if tabstop_ranges.len() > 1 || has_non_empty_tabstop {
+                                let choices = vec![None; tabstop_ranges.len()];
                                 self.snippet_stack.push(SnippetState {
                                     active_index: 0,
                                     ranges: tabstop_ranges,
-                                    choices: Vec::new(),
+                                    choices,
                                 });
                             }
                         } else {

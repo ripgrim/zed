@@ -1,6 +1,6 @@
 # Edit Prediction Tabstop Selections
 
-## Status: ✅ COMPLETED
+## Status: ✅ COMPLETED (with Tab navigation fix)
 
 All implementation steps have been completed and tested. The feature is ready for review.
 
@@ -70,7 +70,9 @@ This should produce 3 tabstops: "item" (selected), "collection" (selected), empt
 - `crates/edit_prediction/src/zeta1.rs` - Empty tabstop_selections
 - `crates/edit_prediction/src/edit_prediction_tests.rs` - Updated test struct
 - `crates/copilot/src/copilot_edit_prediction_delegate.rs` - Empty tabstop_selections
-- `crates/editor/src/editor.rs` - Editor-side tabstop handling
+- `crates/editor/src/editor.rs` - Editor-side tabstop handling + exit tabstop fix
+- `crates/editor/src/edit_prediction_tests.rs` - Added tabstop_selections to test helpers
+- `crates/editor/src/editor_tests.rs` - Added tabstop_selections to test helpers
 
 ## Tests
 All 89 tests in edit_prediction pass, including 10 new tests for `extract_selections_and_cursor`:
@@ -83,6 +85,20 @@ All 89 tests in edit_prediction pass, including 10 new tests for `extract_select
 - `test_extract_selections_and_cursor_orphaned_selection_start`
 - `test_extract_selections_and_cursor_multiple_standalone_cursors`
 - `test_extract_selections_full_example`
+
+## Tab Navigation Fix
+
+**Bug**: After accepting a prediction with tabstop selections, pressing Tab indented the line
+instead of navigating to the next tabstop or collapsing the selection.
+
+**Root cause**: The `tabstop_ranges` only contained the selection tabstops (e.g., `["multiply"]`)
+but no final "exit" tabstop. With only 1 range at `active_index: 0`,
+`move_to_snippet_tabstop(Bias::Right)` checked `0 + 1 < 1` → false, pushed the snippet back,
+and returned false. `tab()` then fell through to indentation (non-empty selection → indent).
+
+**Fix**: Added a final exit tabstop at `cursor_target` (the predicted cursor position) to the
+end of `tabstop_ranges`, mirroring how regular snippets use `$0`. Now Tab on the last selection
+advances to the exit tabstop (collapsing the cursor), and the snippet is done.
 
 ## Key references
 - Snippet tabstop push: `editor.rs` `insert_snippet` L10483 → `self.snippet_stack.push(SnippetState { ... })`
