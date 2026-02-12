@@ -24217,10 +24217,10 @@ impl Editor {
                 .global_lsp_settings
                 .semantic_token_rules
                 .clone();
-            if self
+            let semantic_token_rules_changed = self
                 .semantic_token_state
-                .update_rules(new_semantic_token_rules)
-            {
+                .update_rules(new_semantic_token_rules);
+            if language_settings_changed || semantic_token_rules_changed {
                 self.refresh_semantic_token_highlights(cx);
             }
         }
