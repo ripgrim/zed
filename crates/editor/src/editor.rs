@@ -10854,6 +10854,9 @@ impl Editor {
 
         if self.move_to_next_snippet_tabstop(window, cx) {
             self.hide_mouse_cursor(HideMouseCursorOrigin::TypingAction, cx);
+            if self.snippet_stack.is_empty() {
+                self.refresh_edit_prediction(true, false, window, cx);
+            }
             return;
         }
         cx.propagate();
