@@ -450,14 +450,16 @@ fn map_offset_in_new_text_to_predicted_position(
         if offset_in_new < edit_start_in_new {
             // Offset is before this edit, in unchanged text
             let offset_in_old = (offset_in_new as isize - delta) as usize;
+            let clamped = (buffer_offset + offset_in_old).min(snapshot.len());
             return Some(PredictedCursorPosition::at_anchor(
-                snapshot.anchor_after(buffer_offset + offset_in_old),
+                snapshot.anchor_after(clamped),
             ));
         } else if offset_in_new <= edit_end_in_new {
             // Offset is inside this edit's new text
             let offset_within_insertion = offset_in_new - edit_start_in_new;
+            let clamped = (buffer_offset + old_range.start).min(snapshot.len());
             return Some(PredictedCursorPosition::new(
-                snapshot.anchor_before(buffer_offset + old_range.start),
+                snapshot.anchor_before(clamped),
                 offset_within_insertion,
             ));
         }

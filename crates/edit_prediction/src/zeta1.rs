@@ -376,13 +376,15 @@ pub fn compute_edits_and_cursor_position(
 
                 if cursor_offset < edit_start_in_new {
                     let cursor_in_old = (cursor_offset as isize - delta) as usize;
+                    let clamped = (offset + cursor_in_old).min(snapshot.len());
                     cursor_position = Some(PredictedCursorPosition::at_anchor(
-                        snapshot.anchor_after(offset + cursor_in_old),
+                        snapshot.anchor_after(clamped),
                     ));
                 } else if cursor_offset < edit_end_in_new {
                     let offset_within_insertion = cursor_offset - edit_start_in_new;
+                    let clamped = (offset + raw_old_range.start).min(snapshot.len());
                     cursor_position = Some(PredictedCursorPosition::new(
-                        snapshot.anchor_before(offset + raw_old_range.start),
+                        snapshot.anchor_before(clamped),
                         offset_within_insertion,
                     ));
                 }
@@ -404,6 +406,10 @@ pub fn compute_edits_and_cursor_position(
             old_range.end += offset;
             old_range.start += prefix_len;
             old_range.end -= suffix_len;
+
+            let len = snapshot.len();
+            old_range.start = old_range.start.min(len);
+            old_range.end = old_range.end.min(len);
 
             let new_text = new_text[prefix_len..new_text.len() - suffix_len].into();
             let range = if old_range.is_empty() {
