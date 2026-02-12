@@ -6199,18 +6199,17 @@ impl Repository {
                     bail!("not a local repository")
                 };
 
-                let paths = changed_paths.iter().cloned().collect::<Vec<_>>();
-                if paths.is_empty() {
+                if changed_paths.is_empty() {
                     return Ok(());
                 }
+                let paths = changed_paths.iter().cloned().collect::<Vec<_>>();
                 let statuses = backend.status(&paths).await?;
                 let stash_entries = backend.stash_entries().await?;
 
                 let changed_path_statuses = cx
                     .background_spawn(async move {
                         let mut changed_path_statuses = Vec::new();
-                        let prev_statuses = prev_snapshot.statuses_by_path.clone();
-                        let mut cursor = prev_statuses.cursor::<PathProgress>(());
+                        let mut cursor = prev_snapshot.statuses_by_path.cursor::<PathProgress>(());
 
                         for (repo_path, status) in &*statuses.entries {
                             changed_paths.remove(repo_path);
@@ -6225,7 +6224,7 @@ impl Repository {
                                 status: *status,
                             }));
                         }
-                        let mut cursor = prev_statuses.cursor::<PathProgress>(());
+                        let mut cursor = prev_snapshot.statuses_by_path.cursor::<PathProgress>(());
                         for path in changed_paths.into_iter() {
                             if cursor.seek_forward(&PathTarget::Path(&path), Bias::Left) {
                                 changed_path_statuses

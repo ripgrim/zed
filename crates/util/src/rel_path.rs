@@ -276,7 +276,7 @@ impl PartialOrd for RelPath {
 
 impl Ord for RelPath {
     fn cmp(&self, other: &Self) -> std::cmp::Ordering {
-        self.components().cmp(other.components())
+        self.0.cmp(&other.0)
     }
 }
 
