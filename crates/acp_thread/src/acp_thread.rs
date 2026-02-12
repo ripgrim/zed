@@ -1785,16 +1785,16 @@ impl AcpThread {
         let mut resolutions: Vec<(usize, ToolCallStatus, acp::PermissionOptionId)> = Vec::new();
 
         for (ix, entry) in self.entries.iter().enumerate() {
-            let AgentThreadEntry::ToolCall(call) = entry else {
+            let AgentThreadEntry::ToolCall(ToolCall {
+                status:
+                    ToolCallStatus::WaitingForConfirmation {
+                        permission_input: Some(permission_input),
+                        ..
+                    },
+                ..
+            }) = entry
+            else {
                 continue;
-            };
-
-            let permission_input = match &call.status {
-                ToolCallStatus::WaitingForConfirmation {
-                    permission_input: Some(input),
-                    ..
-                } => input,
-                _ => continue,
             };
 
             let inputs = &permission_input.input_values;
