@@ -19,12 +19,40 @@ use ui::{
 
 const DEFAULT_TITLE: &SharedString = &SharedString::new_static("New Thread");
 
+// todo! make this random (type writer name or something)
+const WORKTREE_BRANCH_META_KEY: &str = "worktree_branch";
+
 fn thread_title(entry: &AgentSessionInfo) -> &SharedString {
     entry
         .title
         .as_ref()
         .filter(|title| !title.is_empty())
         .unwrap_or(DEFAULT_TITLE)
+}
+
+fn worktree_branch_from_meta(entry: &AgentSessionInfo) -> Option<&str> {
+    entry
+        .meta
+        .as_ref()
+        .and_then(|m| m.get(WORKTREE_BRANCH_META_KEY))
+        .and_then(|v| v.as_str())
+        .map(str::trim)
+        .filter(|branch| !branch.is_empty())
+}
+
+fn render_worktree_branch_row(branch: String) -> impl IntoElement {
+    h_flex()
+        .gap_1()
+        .child(
+            Icon::new(IconName::GitBranchAlt)
+                .size(IconSize::XSmall)
+                .color(Color::Muted),
+        )
+        .child(
+            Label::new(branch)
+                .color(Color::Muted)
+                .size(LabelSize::XSmall),
+        )
 }
 
 pub struct AcpThreadHistory {
@@ -650,22 +678,33 @@ impl AcpThreadHistory {
                     .rounded()
                     .toggle_state(selected)
                     .spacing(ListItemSpacing::Sparse)
-                    .start_slot(
-                        h_flex()
+                    .start_slot({
+                        let branch = worktree_branch_from_meta(entry).map(|b| b.to_string());
+                        v_flex()
                             .w_full()
-                            .gap_2()
-                            .justify_between()
                             .child(
-                                HighlightedLabel::new(thread_title(entry), highlight_positions)
-                                    .size(LabelSize::Small)
-                                    .truncate(),
+                                h_flex()
+                                    .w_full()
+                                    .gap_2()
+                                    .justify_between()
+                                    .child(
+                                        HighlightedLabel::new(
+                                            thread_title(entry),
+                                            highlight_positions,
+                                        )
+                                        .size(LabelSize::Small)
+                                        .truncate(),
+                                    )
+                                    .child(
+                                        Label::new(display_text)
+                                            .color(Color::Muted)
+                                            .size(LabelSize::XSmall),
+                                    ),
                             )
-                            .child(
-                                Label::new(display_text)
-                                    .color(Color::Muted)
-                                    .size(LabelSize::XSmall),
-                            ),
-                    )
+                            .when_some(branch, |this, branch| {
+                                this.child(render_worktree_branch_row(branch))
+                            })
+                    })
                     .tooltip(move |_, cx| {
                         Tooltip::with_meta(title.clone(), None, full_date.clone(), cx)
                     })
@@ -901,21 +940,30 @@ impl RenderOnce for AcpHistoryEntryElement {
             })
             .unwrap_or_else(|| "Unknown".to_string());
 
+        let branch = worktree_branch_from_meta(&self.entry).map(|b| b.to_string());
+
         ListItem::new(id)
             .rounded()
             .toggle_state(self.selected)
             .spacing(ListItemSpacing::Sparse)
             .start_slot(
-                h_flex()
+                v_flex()
                     .w_full()
-                    .gap_2()
-                    .justify_between()
-                    .child(Label::new(title).size(LabelSize::Small).truncate())
                     .child(
-                        Label::new(formatted_time)
-                            .color(Color::Muted)
-                            .size(LabelSize::XSmall),
-                    ),
+                        h_flex()
+                            .w_full()
+                            .gap_2()
+                            .justify_between()
+                            .child(Label::new(title).size(LabelSize::Small).truncate())
+                            .child(
+                                Label::new(formatted_time)
+                                    .color(Color::Muted)
+                                    .size(LabelSize::XSmall),
+                            ),
+                    )
+                    .when_some(branch, |this, branch| {
+                        this.child(render_worktree_branch_row(branch))
+                    }),
             )
             .on_hover(self.on_hover)
             .end_slot::<IconButton>(if (self.hovered || self.selected) && self.supports_delete {
