@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize, de::Error as _};
 use settings_macros::{MergeFrom, with_fallible_options};
 use std::sync::Arc;
 
-use crate::{DocumentFoldingRanges, ExtendingVec, SemanticTokens, merge_from};
+use crate::{DocumentFoldingRanges, DocumentSymbols, ExtendingVec, SemanticTokens, merge_from};
 
 /// The state of the modifier keys at some point in time
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema, MergeFrom)]
@@ -195,8 +195,6 @@ pub struct EditPredictionSettingsContent {
     pub enabled_in_text_threads: Option<bool>,
     /// The directory where manually captured edit prediction examples are stored.
     pub examples_dir: Option<Arc<Path>>,
-    /// The number of edit prediction examples captured per ten thousand predictions.
-    pub example_capture_rate: Option<u16>,
 }
 
 #[with_fallible_options]
@@ -440,6 +438,14 @@ pub struct LanguageSettingsContent {
     ///
     /// Default: "off"
     pub document_folding_ranges: Option<DocumentFoldingRanges>,
+    /// Controls the source of document symbols used for outlines and breadcrumbs.
+    ///
+    /// Options:
+    /// - "off": Use tree-sitter queries to compute document symbols (default).
+    /// - "on": Use the language server's `textDocument/documentSymbol` LSP response. When enabled, tree-sitter is not used for document symbols.
+    ///
+    /// Default: "off"
+    pub document_symbols: Option<DocumentSymbols>,
     /// Controls where the `editor::Rewrap` action is allowed for this language.
     ///
     /// Note: This setting has no effect in Vim mode, as rewrap is already
