@@ -7858,7 +7858,7 @@ impl Editor {
     }
 
     fn should_show_edit_predictions(&self) -> bool {
-        self.snippet_stack.is_empty() && self.edit_predictions_enabled()
+        self.edit_predictions_enabled()
     }
 
     pub fn edit_prediction_preview_is_active(&self) -> bool {
