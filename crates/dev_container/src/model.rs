@@ -254,7 +254,15 @@ impl<'de> Deserialize<'de> for LifecyleScript {
 
 #[derive(Debug, Deserialize, Serialize, Eq, PartialEq)]
 #[serde(rename_all = "camelCase")]
-pub(crate) struct ContainerBuild; // TODO
+pub(crate) struct ContainerBuild {
+    dockerfile: Option<String>,
+    context: Option<String>,
+    args: Option<HashMap<String, String>>,
+    options: Option<Vec<String>>,
+    target: Option<String>,
+    #[serde(default, deserialize_with = "deserialize_string_or_array")]
+    cache_from: Option<Vec<String>>,
+}
 
 #[derive(Debug, Deserialize, Serialize, Eq, PartialEq)]
 #[serde(rename_all = "camelCase")]
@@ -637,12 +645,12 @@ mod test {
     };
 
     use crate::model::{
-        DevContainer, DockerConfigLabels, DockerInspect, DockerInspectConfig, DockerPs,
-        FeaturePlaceholder, ForwardPort, HostRequirements, LifecycleCommand, LifecyleScript,
-        MountDefinition, OnAutoForward, PortAttributeProtocol, PortAttributes, RenameMeError,
-        ShutdownAction, UserEnvProbe, create_docker_inspect, create_docker_run_command,
-        deserialize_devcontainer_json, deserialize_json_output, get_remote_dir_from_config,
-        get_remote_user_from_config,
+        ContainerBuild, DevContainer, DockerConfigLabels, DockerInspect, DockerInspectConfig,
+        DockerPs, FeaturePlaceholder, ForwardPort, HostRequirements, LifecycleCommand,
+        LifecyleScript, MountDefinition, OnAutoForward, PortAttributeProtocol, PortAttributes,
+        RenameMeError, ShutdownAction, UserEnvProbe, create_docker_inspect,
+        create_docker_run_command, deserialize_devcontainer_json, deserialize_json_output,
+        get_remote_dir_from_config, get_remote_user_from_config,
     };
 
     // Tests needed as I come across them
@@ -1150,11 +1158,6 @@ mod test {
 
     #[test]
     fn should_deserialize_dockerfile_devcontainer_json() {
-        // DOCKERFILECONTAINER (this is complicated so needs to be subdivided)
-        // build: Option<ContainerBuild>,
-        // dockerfile (TODO)
-        // context (TODO)
-        //
         let given_dockerfile_container_json = r#"
             // These are some external comments. serde_lenient should handle them
             {
@@ -1242,7 +1245,20 @@ mod test {
                 "shutdownAction": "stopContainer",
                 "overrideCommand": true,
                 "workspaceFolder": "/workspaces",
-                "workspaceMount": "/workspaces/app"
+                "workspaceMount": "/workspaces/app",
+                "build": {
+                   	"dockerfile": "DockerFile",
+                   	"context": "..",
+                   	"args": {
+                   	    "MYARG": "MYVALUE"
+                   	},
+                   	"options": [
+                   	    "--some-option",
+                   	    "--mount"
+                   	],
+                   	"target": "development",
+                   	"cacheFrom": "some_image"
+                }
             }
             "#;
 
@@ -1364,6 +1380,17 @@ mod test {
                 override_command: Some(true),
                 workspace_folder: Some("/workspaces".to_string()),
                 workspace_mount: Some("/workspaces/app".to_string()),
+                build: Some(ContainerBuild {
+                    dockerfile: Some("DockerFile".to_string()),
+                    context: Some("..".to_string()),
+                    args: Some(HashMap::from([(
+                        "MYARG".to_string(),
+                        "MYVALUE".to_string()
+                    )])),
+                    options: Some(vec!["--some-option".to_string(), "--mount".to_string()]),
+                    target: Some("development".to_string()),
+                    cache_from: Some(vec!["some_image".to_string()]),
+                }),
                 ..Default::default()
             }
         );
