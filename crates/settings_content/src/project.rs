@@ -439,7 +439,7 @@ impl std::fmt::Debug for ContextServerCommand {
 }
 
 #[with_fallible_options]
-#[derive(Copy, Clone, Debug, PartialEq, Default, Serialize, Deserialize, JsonSchema, MergeFrom)]
+#[derive(Clone, Debug, PartialEq, Default, Serialize, Deserialize, JsonSchema, MergeFrom)]
 pub struct GitSettings {
     /// Whether or not to enable git integration.
     ///
@@ -473,6 +473,13 @@ pub struct GitSettings {
     ///
     /// Default: file_name_first
     pub path_style: Option<GitPathStyle>,
+    /// Directory where agent worktrees are created.
+    /// If not set, defaults to the Zed data directory.
+    ///
+    /// Can be an absolute path or relative to the project root.
+    ///
+    /// Default: null (uses system default)
+    pub agent_worktree_directory: Option<String>,
 }
 
 #[with_fallible_options]

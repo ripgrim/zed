@@ -421,7 +421,7 @@ impl GoToDiagnosticSeverityFilter {
     }
 }
 
-#[derive(Copy, Clone, Debug)]
+#[derive(Clone, Debug)]
 pub struct GitSettings {
     /// Whether or not git integration is enabled.
     ///
@@ -454,6 +454,9 @@ pub struct GitSettings {
     ///
     /// Default: file_name_first
     pub path_style: GitPathStyle,
+    /// Directory where agent worktrees are created.
+    /// If not set, defaults to the Zed data directory.
+    pub agent_worktree_directory: Option<String>,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -643,6 +646,7 @@ impl Settings for ProjectSettings {
             },
             hunk_style: git.hunk_style.unwrap(),
             path_style: git.path_style.unwrap().into(),
+            agent_worktree_directory: git.agent_worktree_directory.clone(),
         };
         Self {
             context_servers: project

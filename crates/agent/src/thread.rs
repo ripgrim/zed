@@ -1,8 +1,8 @@
 use crate::{
-    ContextServerRegistry, CopyPathTool, CreateDirectoryTool, DbLanguageModel, DbThread,
-    DeletePathTool, DiagnosticsTool, EditFileTool, FetchTool, FindPathTool, GrepTool,
-    ListDirectoryTool, MovePathTool, NowTool, OpenTool, ProjectSnapshot, ReadFileTool,
-    RestoreFileFromDiskTool, SaveFileTool, StreamingEditFileTool, SubagentTool,
+    AgentGitWorktreeInfo, ContextServerRegistry, CopyPathTool, CreateDirectoryTool,
+    DbLanguageModel, DbThread, DeletePathTool, DiagnosticsTool, EditFileTool, FetchTool,
+    FindPathTool, GrepTool, ListDirectoryTool, MovePathTool, NowTool, OpenTool, ProjectSnapshot,
+    ReadFileTool, RestoreFileFromDiskTool, SaveFileTool, StreamingEditFileTool, SubagentTool,
     SystemPromptTemplate, Template, Templates, TerminalTool, ToolPermissionDecision, WebSearchTool,
     decide_permission_from_settings,
 };
@@ -32,7 +32,6 @@ use futures::{
 use gpui::{
     App, AppContext, AsyncApp, Context, Entity, EventEmitter, SharedString, Task, WeakEntity,
 };
-use heck::ToSnakeCase as _;
 use language_model::{
     LanguageModel, LanguageModelCompletionError, LanguageModelCompletionEvent, LanguageModelId,
     LanguageModelImage, LanguageModelProviderId, LanguageModelRegistry, LanguageModelRequest,
@@ -840,6 +839,8 @@ pub struct Thread {
     subagent_context: Option<SubagentContext>,
     /// Weak references to running subagent threads for cancellation propagation
     running_subagents: Vec<WeakEntity<Thread>>,
+    /// Git worktree info if this thread is running in an agent worktree.
+    pub(crate) git_worktree_info: Option<AgentGitWorktreeInfo>,
 }
 
 impl Thread {
@@ -930,6 +931,7 @@ impl Thread {
             imported: false,
             subagent_context: None,
             running_subagents: Vec::new(),
+            git_worktree_info: None,
         }
     }
 
@@ -983,20 +985,6 @@ impl Thread {
         stream: &ThreadEventStream,
         cx: &mut Context<Self>,
     ) {
-        // Extract saved output and status first, so they're available even if tool is not found
-        let output = tool_result
-            .as_ref()
-            .and_then(|result| result.output.clone());
-        let status = tool_result
-            .as_ref()
-            .map_or(acp::ToolCallStatus::Failed, |result| {
-                if result.is_error {
-                    acp::ToolCallStatus::Failed
-                } else {
-                    acp::ToolCallStatus::Completed
-                }
-            });
-
         let tool = self.tools.get(tool_use.name.as_ref()).cloned().or_else(|| {
             self.context_server_registry
                 .read(cx)
@@ -1011,25 +999,14 @@ impl Thread {
         });
 
         let Some(tool) = tool else {
-            // Tool not found (e.g., MCP server not connected after restart),
-            // but still display the saved result if available.
-            // We need to send both ToolCall and ToolCallUpdate events because the UI
-            // only converts raw_output to displayable content in update_fields, not from_acp.
             stream
                 .0
                 .unbounded_send(Ok(ThreadEvent::ToolCall(
                     acp::ToolCall::new(tool_use.id.to_string(), tool_use.name.to_string())
-                        .status(status)
+                        .status(acp::ToolCallStatus::Failed)
                         .raw_input(tool_use.input.clone()),
                 )))
                 .ok();
-            stream.update_tool_call_fields(
-                &tool_use.id,
-                acp::ToolCallUpdateFields::new()
-                    .status(status)
-                    .raw_output(output),
-                None,
-            );
             return;
         };
 
@@ -1043,6 +1020,9 @@ impl Thread {
             tool_use.input.clone(),
         );
 
+        let output = tool_result
+            .as_ref()
+            .and_then(|result| result.output.clone());
         if let Some(output) = output.clone() {
             // For replay, we use a dummy cancellation receiver since the tool already completed
             let (_cancellation_tx, cancellation_rx) = watch::channel(false);
@@ -1059,7 +1039,17 @@ impl Thread {
         stream.update_tool_call_fields(
             &tool_use.id,
             acp::ToolCallUpdateFields::new()
-                .status(status)
+                .status(
+                    tool_result
+                        .as_ref()
+                        .map_or(acp::ToolCallStatus::Failed, |result| {
+                            if result.is_error {
+                                acp::ToolCallStatus::Failed
+                            } else {
+                                acp::ToolCallStatus::Completed
+                            }
+                        }),
+                )
                 .raw_output(output),
             None,
         );
@@ -1154,6 +1144,7 @@ impl Thread {
             imported: db_thread.imported,
             subagent_context: db_thread.subagent_context,
             running_subagents: Vec::new(),
+            git_worktree_info: db_thread.git_worktree_info,
         }
     }
 
@@ -1174,6 +1165,7 @@ impl Thread {
             profile: Some(self.profile_id.clone()),
             imported: self.imported,
             subagent_context: self.subagent_context.clone(),
+            git_worktree_info: self.git_worktree_info.clone(),
         };
 
         cx.background_spawn(async move {
@@ -1425,6 +1417,10 @@ impl Thread {
 
     pub fn set_has_queued_message(&mut self, has_queued: bool) {
         self.has_queued_message = has_queued;
+    }
+
+    pub fn set_git_worktree_info(&mut self, info: AgentGitWorktreeInfo) {
+        self.git_worktree_info = Some(info);
     }
 
     pub fn has_queued_message(&self) -> bool {
@@ -2467,14 +2463,13 @@ impl Thread {
         }
 
         // When there are duplicate tool names, disambiguate by prefixing them
-        // with the server ID (converted to snake_case for API compatibility).
-        // In the rare case there isn't enough space for the disambiguated tool
-        // name, keep only the last tool with this name.
+        // with the server ID. In the rare case there isn't enough space for the
+        // disambiguated tool name, keep only the last tool with this name.
         for (server_id, tool_name, tool) in context_server_tools {
             if duplicate_tool_names.contains(&tool_name) {
                 let available = MAX_TOOL_NAME_LENGTH.saturating_sub(tool_name.len());
                 if available >= 2 {
-                    let mut disambiguated = server_id.0.to_snake_case();
+                    let mut disambiguated = server_id.0.to_string();
                     disambiguated.truncate(available - 1);
                     disambiguated.push('_');
                     disambiguated.push_str(&tool_name);

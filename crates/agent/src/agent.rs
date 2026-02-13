@@ -1395,19 +1395,12 @@ impl acp_thread::AgentConnection for NativeAgentConnection {
     fn set_title(
         &self,
         session_id: &acp::SessionId,
-        cx: &App,
+        _cx: &App,
     ) -> Option<Rc<dyn acp_thread::AgentSessionSetTitle>> {
-        self.0.read_with(cx, |agent, _cx| {
-            agent
-                .sessions
-                .get(session_id)
-                .filter(|s| !s.thread.read(cx).is_subagent())
-                .map(|session| {
-                    Rc::new(NativeAgentSessionSetTitle {
-                        thread: session.thread.clone(),
-                    }) as _
-                })
-        })
+        Some(Rc::new(NativeAgentSessionSetTitle {
+            connection: self.clone(),
+            session_id: session_id.clone(),
+        }) as _)
     }
 
     fn session_list(&self, cx: &mut App) -> Option<Rc<dyn AgentSessionList>> {
@@ -1466,12 +1459,21 @@ impl NativeAgentSessionList {
     }
 
     fn to_session_info(entry: DbThreadMetadata) -> AgentSessionInfo {
+        let meta = entry.worktree_branch.map(|branch| {
+            let mut map = serde_json::Map::new();
+            map.insert(
+                "worktree_branch".to_string(),
+                serde_json::Value::String(branch),
+            );
+            map
+        });
+
         AgentSessionInfo {
             session_id: entry.id,
             cwd: None,
             title: Some(entry.title),
             updated_at: Some(entry.updated_at),
-            meta: None,
+            meta,
         }
     }
 
@@ -1566,13 +1568,17 @@ impl acp_thread::AgentSessionRetry for NativeAgentSessionRetry {
 }
 
 struct NativeAgentSessionSetTitle {
-    thread: Entity<Thread>,
+    connection: NativeAgentConnection,
+    session_id: acp::SessionId,
 }
 
 impl acp_thread::AgentSessionSetTitle for NativeAgentSessionSetTitle {
     fn run(&self, title: SharedString, cx: &mut App) -> Task<Result<()>> {
-        self.thread
-            .update(cx, |thread, cx| thread.set_title(title, cx));
+        let Some(session) = self.connection.0.read(cx).sessions.get(&self.session_id) else {
+            return Task::ready(Err(anyhow!("session not found")));
+        };
+        let thread = session.thread.clone();
+        thread.update(cx, |thread, cx| thread.set_title(title, cx));
         Task::ready(Ok(()))
     }
 }
