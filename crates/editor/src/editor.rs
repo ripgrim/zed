@@ -70,7 +70,7 @@ pub use element::{
 };
 pub use git::blame::BlameRenderer;
 pub use hover_popover::hover_markdown_style;
-pub use inlays::Inlay;
+pub use inlays::{Inlay, InlayContent};
 pub use items::MAX_TAB_TITLE_LEN;
 pub use lsp::CompletionContext;
 pub use lsp_ext::lsp_tasks;
@@ -1153,6 +1153,7 @@ pub struct Editor {
     deferred_selection_effects_state: Option<DeferredSelectionEffectsState>,
     autoclose_regions: Vec<AutocloseRegion>,
     snippet_stack: InvalidationStack<SnippetState>,
+    snippet_cursor_inlay_ids: Vec<InlayId>,
     select_syntax_node_history: SelectSyntaxNodeHistory,
     ime_transaction: Option<TransactionId>,
     pub diagnostics_max_severity: DiagnosticSeverity,
@@ -2389,6 +2390,7 @@ impl Editor {
             deferred_selection_effects_state: None,
             autoclose_regions: Vec::new(),
             snippet_stack: InvalidationStack::default(),
+            snippet_cursor_inlay_ids: Vec::new(),
             select_syntax_node_history: SelectSyntaxNodeHistory::default(),
             ime_transaction: None,
             active_diagnostics: ActiveDiagnostic::None,
@@ -10747,19 +10749,31 @@ impl Editor {
 
     fn update_snippet_tabstop_highlights(&mut self, cx: &mut Context<Self>) {
         if let Some(snippet) = self.snippet_stack.last() {
-            let ranges: Vec<Range<Anchor>> = snippet
-                .ranges
-                .iter()
-                .enumerate()
-                .filter(|(i, _)| *i != snippet.active_index)
-                .flat_map(|(_, tabstop_ranges)| tabstop_ranges.iter().cloned())
-                .collect();
-            if ranges.is_empty() {
+            let snapshot = self.buffer.read(cx).snapshot(cx);
+            let mut placeholder_ranges = Vec::new();
+            let mut cursor_positions = Vec::new();
+
+            for (i, tabstop_ranges) in snippet.ranges.iter().enumerate() {
+                if i == snippet.active_index {
+                    continue;
+                }
+                for range in tabstop_ranges {
+                    let start = range.start.to_offset(&snapshot);
+                    let end = range.end.to_offset(&snapshot);
+                    if start == end {
+                        cursor_positions.push(range.start);
+                    } else {
+                        placeholder_ranges.push(range.clone());
+                    }
+                }
+            }
+
+            if placeholder_ranges.is_empty() {
                 self.clear_highlights(HighlightKey::SnippetTabstop, cx);
             } else {
                 self.highlight_text(
                     HighlightKey::SnippetTabstop,
-                    ranges,
+                    placeholder_ranges,
                     HighlightStyle {
                         underline: Some(UnderlineStyle {
                             thickness: px(1.),
@@ -10771,8 +10785,27 @@ impl Editor {
                     cx,
                 );
             }
+
+            let old_inlay_ids = std::mem::take(&mut self.snippet_cursor_inlay_ids);
+            let new_inlays: Vec<Inlay> = cursor_positions
+                .into_iter()
+                .map(|position| {
+                    let id = InlayId::SnippetCursor(post_inc(&mut self.next_inlay_id));
+                    Inlay {
+                        id,
+                        position,
+                        content: InlayContent::Text("⎸".into()),
+                    }
+                })
+                .collect();
+            self.snippet_cursor_inlay_ids = new_inlays.iter().map(|inlay| inlay.id).collect();
+            self.splice_inlays(&old_inlay_ids, new_inlays, cx);
         } else {
             self.clear_highlights(HighlightKey::SnippetTabstop, cx);
+            let old_inlay_ids = std::mem::take(&mut self.snippet_cursor_inlay_ids);
+            if !old_inlay_ids.is_empty() {
+                self.splice_inlays(&old_inlay_ids, Vec::new(), cx);
+            }
         }
     }
 
