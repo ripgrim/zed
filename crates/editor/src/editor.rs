@@ -3552,6 +3552,7 @@ impl Editor {
         self.select_syntax_node_history.try_clear();
         self.invalidate_autoclose_regions(&selection_anchors, buffer);
         self.snippet_stack.invalidate(&selection_anchors, buffer);
+        self.update_snippet_tabstop_highlights(cx);
         self.take_rename(false, window, cx);
 
         let newest_selection = self.selections.newest_anchor();
@@ -4493,7 +4494,10 @@ impl Editor {
         dismissed |= self.mouse_context_menu.take().is_some();
         dismissed |= is_user_requested
             && self.discard_edit_prediction(EditPredictionDiscardReason::Rejected, cx);
-        dismissed |= self.snippet_stack.pop().is_some();
+        if self.snippet_stack.pop().is_some() {
+            dismissed = true;
+            self.update_snippet_tabstop_highlights(cx);
+        }
         if self.diff_review_drag_state.is_some() {
             self.cancel_diff_review_drag(cx);
             dismissed = true;
@@ -8109,6 +8113,7 @@ impl Editor {
                                     ranges: tabstop_ranges,
                                     choices,
                                 });
+                                self.update_snippet_tabstop_highlights(cx);
                             }
                         } else {
                             self.change_selections(
@@ -10609,6 +10614,7 @@ impl Editor {
                     ranges,
                     choices,
                 });
+                self.update_snippet_tabstop_highlights(cx);
             }
 
             // Check whether the just-entered snippet ends with an auto-closable bracket.
@@ -10731,11 +10737,43 @@ impl Editor {
                 if snippet.active_index + 1 < snippet.ranges.len() {
                     self.snippet_stack.push(snippet);
                 }
+                self.update_snippet_tabstop_highlights(cx);
                 return true;
             }
         }
 
         false
+    }
+
+    fn update_snippet_tabstop_highlights(&mut self, cx: &mut Context<Self>) {
+        if let Some(snippet) = self.snippet_stack.last() {
+            let ranges: Vec<Range<Anchor>> = snippet
+                .ranges
+                .iter()
+                .enumerate()
+                .filter(|(i, _)| *i != snippet.active_index)
+                .flat_map(|(_, tabstop_ranges)| tabstop_ranges.iter().cloned())
+                .collect();
+            if ranges.is_empty() {
+                self.clear_highlights(HighlightKey::SnippetTabstop, cx);
+            } else {
+                self.highlight_text(
+                    HighlightKey::SnippetTabstop,
+                    ranges,
+                    HighlightStyle {
+                        underline: Some(UnderlineStyle {
+                            thickness: px(1.),
+                            color: None,
+                            wavy: false,
+                        }),
+                        ..Default::default()
+                    },
+                    cx,
+                );
+            }
+        } else {
+            self.clear_highlights(HighlightKey::SnippetTabstop, cx);
+        }
     }
 
     pub fn clear(&mut self, window: &mut Window, cx: &mut Context<Self>) {
