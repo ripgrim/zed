@@ -49,8 +49,10 @@ pub struct FakeGitRepositoryState {
     /// List of remotes, keys are names and values are URLs
     pub remotes: HashMap<String, String>,
     pub simulated_index_write_error_message: Option<String>,
+    pub simulated_create_worktree_error: Option<String>,
     pub refs: HashMap<String, String>,
     pub graph_commits: Vec<Arc<InitialGraphCommitData>>,
+    pub worktrees: Vec<Worktree>,
 }
 
 impl FakeGitRepositoryState {
@@ -64,11 +66,13 @@ impl FakeGitRepositoryState {
             current_branch_name: Default::default(),
             branches: Default::default(),
             simulated_index_write_error_message: Default::default(),
+            simulated_create_worktree_error: Default::default(),
             refs: HashMap::from_iter([("HEAD".into(), "abc".into())]),
             merge_base_contents: Default::default(),
             oids: Default::default(),
             remotes: HashMap::default(),
             graph_commits: Vec::new(),
+            worktrees: Vec::new(),
         }
     }
 }
@@ -402,16 +406,69 @@ impl GitRepository for FakeGitRepository {
     }
 
     fn worktrees(&self) -> BoxFuture<'_, Result<Vec<Worktree>>> {
-        unimplemented!()
+        self.with_state_async(false, |state| Ok(state.worktrees.clone()))
     }
 
     fn create_worktree(
         &self,
-        _: String,
-        _: PathBuf,
-        _: Option<String>,
+        name: String,
+        directory: PathBuf,
+        from_commit: Option<String>,
     ) -> BoxFuture<'_, Result<()>> {
-        unimplemented!()
+        let fs = self.fs.clone();
+        let executor = self.executor.clone();
+        let dot_git_path = self.dot_git_path.clone();
+        async move {
+            let path = directory.join(&name);
+            executor.simulate_random_delay().await;
+            fs.with_git_state(&dot_git_path, true, {
+                let path = path.clone();
+                move |state| {
+                    if let Some(message) = &state.simulated_create_worktree_error {
+                        anyhow::bail!("{message}");
+                    }
+                    let ref_name = format!("refs/heads/{name}");
+                    let sha = from_commit.unwrap_or_else(|| "fake-sha".to_string());
+                    state.worktrees.push(Worktree {
+                        path,
+                        ref_name: ref_name.into(),
+                        sha: sha.into(),
+                    });
+                    state.branches.insert(name);
+                    Ok::<(), anyhow::Error>(())
+                }
+            })??;
+            fs.create_dir(&path).await?;
+            Ok(())
+        }
+        .boxed()
+    }
+
+    fn remove_worktree(&self, path: PathBuf, _force: bool) -> BoxFuture<'_, Result<()>> {
+        self.with_state_async(true, move |state| {
+            let initial_len = state.worktrees.len();
+            state.worktrees.retain(|worktree| worktree.path != path);
+            if state.worktrees.len() == initial_len {
+                bail!("no worktree found at path: {}", path.display());
+            }
+            Ok(())
+        })
+    }
+
+    fn rename_worktree(&self, old_path: PathBuf, new_path: PathBuf) -> BoxFuture<'_, Result<()>> {
+        self.with_state_async(true, move |state| {
+            let worktree = state
+                .worktrees
+                .iter_mut()
+                .find(|worktree| worktree.path == old_path);
+            match worktree {
+                Some(worktree) => {
+                    worktree.path = new_path;
+                    Ok(())
+                }
+                None => bail!("no worktree found at path: {}", old_path.display()),
+            }
+        })
     }
 
     fn change_branch(&self, name: String) -> BoxFuture<'_, Result<()>> {
@@ -763,5 +820,111 @@ impl GitRepository for FakeGitRepository {
 
     fn commit_data_reader(&self) -> Result<CommitDataReader> {
         anyhow::bail!("commit_data_reader not supported for FakeGitRepository")
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{FakeFs, Fs};
+    use gpui::TestAppContext;
+    use serde_json::json;
+    use std::path::Path;
+
+    #[gpui::test]
+    async fn test_fake_worktree_lifecycle(cx: &mut TestAppContext) {
+        let fs = FakeFs::new(cx.executor());
+        fs.insert_tree("/project", json!({".git": {}, "file.txt": "content"}))
+            .await;
+        let repo = fs
+            .open_repo(Path::new("/project/.git"), None)
+            .expect("should open fake repo");
+
+        // Initially no worktrees
+        let worktrees = repo.worktrees().await.unwrap();
+        assert!(worktrees.is_empty());
+
+        // Create a worktree
+        repo.create_worktree(
+            "feature-branch".to_string(),
+            PathBuf::from("/worktrees"),
+            Some("abc123".to_string()),
+        )
+        .await
+        .unwrap();
+
+        // List worktrees — should have one
+        let worktrees = repo.worktrees().await.unwrap();
+        assert_eq!(worktrees.len(), 1);
+        assert_eq!(
+            worktrees[0].path,
+            PathBuf::from("/worktrees/feature-branch")
+        );
+        assert_eq!(worktrees[0].ref_name.as_ref(), "refs/heads/feature-branch");
+        assert_eq!(worktrees[0].sha.as_ref(), "abc123");
+
+        // Create a second worktree (without explicit commit)
+        repo.create_worktree(
+            "bugfix-branch".to_string(),
+            PathBuf::from("/worktrees"),
+            None,
+        )
+        .await
+        .unwrap();
+
+        let worktrees = repo.worktrees().await.unwrap();
+        assert_eq!(worktrees.len(), 2);
+
+        // Rename the first worktree
+        repo.rename_worktree(
+            PathBuf::from("/worktrees/feature-branch"),
+            PathBuf::from("/worktrees/renamed-branch"),
+        )
+        .await
+        .unwrap();
+
+        let worktrees = repo.worktrees().await.unwrap();
+        assert_eq!(worktrees.len(), 2);
+        assert!(
+            worktrees
+                .iter()
+                .any(|w| w.path == PathBuf::from("/worktrees/renamed-branch")),
+            "renamed worktree should exist at new path"
+        );
+        assert!(
+            worktrees
+                .iter()
+                .all(|w| w.path != PathBuf::from("/worktrees/feature-branch")),
+            "old path should no longer exist"
+        );
+
+        // Rename a nonexistent worktree should fail
+        let result = repo
+            .rename_worktree(PathBuf::from("/nonexistent"), PathBuf::from("/somewhere"))
+            .await;
+        assert!(result.is_err());
+
+        // Remove a worktree
+        repo.remove_worktree(PathBuf::from("/worktrees/renamed-branch"), false)
+            .await
+            .unwrap();
+
+        let worktrees = repo.worktrees().await.unwrap();
+        assert_eq!(worktrees.len(), 1);
+        assert_eq!(worktrees[0].path, PathBuf::from("/worktrees/bugfix-branch"));
+
+        // Remove a nonexistent worktree should fail
+        let result = repo
+            .remove_worktree(PathBuf::from("/nonexistent"), false)
+            .await;
+        assert!(result.is_err());
+
+        // Remove the last worktree
+        repo.remove_worktree(PathBuf::from("/worktrees/bugfix-branch"), false)
+            .await
+            .unwrap();
+
+        let worktrees = repo.worktrees().await.unwrap();
+        assert!(worktrees.is_empty());
     }
 }
