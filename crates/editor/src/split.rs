@@ -1986,8 +1986,7 @@ impl LhsEditor {
         // causes range merging on the LHS that produces fewer LHS excerpt IDs
         // than RHS excerpt IDs, leaving some RHS excerpts without companion
         // mappings.
-        let rhs_excerpt_id_set: HashSet<ExcerptId> =
-            rhs_excerpt_ids.iter().copied().collect();
+        let rhs_excerpt_id_set: HashSet<ExcerptId> = rhs_excerpt_ids.iter().copied().collect();
         let new = rhs_multibuffer
             .excerpts_for_buffer(main_buffer.remote_id(), lhs_cx)
             .into_iter()
