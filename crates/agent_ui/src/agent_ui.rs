@@ -4,6 +4,7 @@ mod agent_diff;
 mod agent_model_selector;
 mod agent_panel;
 mod agent_registry_ui;
+mod agent_worktree;
 mod buffer_codegen;
 mod completion_provider;
 mod context;
@@ -468,6 +469,9 @@ fn update_command_palette_filter(cx: &mut App) {
 
             filter.show_namespace("zed_predict_onboarding");
             filter.show_action_types(&[TypeId::of::<zed_actions::OpenZedPredictOnboarding>()]);
+            if !agent_v2_enabled {
+                filter.hide_action_types(&[TypeId::of::<zed_actions::agent::ToggleAgentPane>()]);
+            }
         }
 
         if agent_v2_enabled {
