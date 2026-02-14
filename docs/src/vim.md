@@ -250,29 +250,33 @@ Below, you'll find tables listing the commands you can use in the command palett
 
 This table shows commands for managing windows, tabs, and panes. As commands don't support arguments currently, you cannot specify a filename when saving or creating a new file.
 
-| Command        | Description                                          |
-| -------------- | ---------------------------------------------------- |
-| `:w[rite][!]`  | Save the current file                                |
-| `:wq[!]`       | Save the file and close the buffer                   |
-| `:q[uit][!]`   | Close the buffer                                     |
-| `:wa[ll][!]`   | Save all open files                                  |
-| `:wqa[ll][!]`  | Save all open files and close all buffers            |
-| `:qa[ll][!]`   | Close all buffers                                    |
-| `:[e]x[it][!]` | Close the buffer                                     |
-| `:up[date]`    | Save the current file                                |
-| `:cq`          | Quit completely (close all running instances of Zed) |
-| `:vs[plit]`    | Split the pane vertically                            |
-| `:sp[lit]`     | Split the pane horizontally                          |
-| `:new`         | Create a new file in a horizontal split              |
-| `:vne[w]`      | Create a new file in a vertical split                |
-| `:tabedit`     | Create a new file in a new tab                       |
-| `:tabnew`      | Create a new file in a new tab                       |
-| `:tabn[ext]`   | Go to the next tab                                   |
-| `:tabp[rev]`   | Go to previous tab                                   |
-| `:tabc[lose]`  | Close the current tab                                |
-| `:ls`          | Show all buffers                                     |
+| Command        | Description                                               |
+| -------------- | --------------------------------------------------------- |
+| `:w[rite][!]`  | Save the current file                                     |
+| `:wq[!]`       | Save the file and close the buffer                        |
+| `:q[uit][!]`   | Close the buffer                                          |
+| `:wa[ll][!]`   | Save all open files                                       |
+| `:wqa[ll][!]`  | Save all open files and close all buffers                 |
+| `:qa[ll][!]`   | Close all buffers                                         |
+| `:[e]x[it][!]` | Close the buffer                                          |
+| `:up[date]`    | Save the current file                                     |
+| `:cq`          | Quit completely (close all running instances of Zed)      |
+| `:vs[plit]`    | Split the pane vertically                                 |
+| `:sp[lit]`     | Split the pane horizontally                               |
+| `:new`         | Create a new file in a horizontal split                   |
+| `:vne[w]`      | Create a new file in a vertical split                     |
+| `:tabedit`     | Create a new file in a new tab                            |
+| `:tabnew`      | Create a new file in a new tab                            |
+| `:tabn[ext]`   | Go to the next tab                                        |
+| `:tabp[rev]`   | Go to previous tab                                        |
+| `:tabc[lose]`  | Close the current tab                                     |
+| `:ls`          | Show all buffers                                          |
+| `:bd[elete]`   | Close the active item across all panes                    |
+| `:bd[elete]!`  | Close the active item across all panes (including pinned) |
 
 > **Note:** The `!` character is used to force the command to execute without saving changes or prompting before overwriting a file.
+
+> **Note:** The `:bd[elete]` command (available in Zed v0.224.0 and above) closes the active item in all panes where it appears. If a file is open in multiple panes, all instances will be closed. Use `:bd[elete]!` to also close pinned items.
 
 ### Ex commands
 

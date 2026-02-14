@@ -12,13 +12,25 @@ If your repository includes a `.devcontainer/devcontainer.json` file, Zed can op
 ## Requirements
 
 - Docker must be installed and available in your `PATH`. Zed requires the `docker` command to be present. If you use Podman, you must alias it to `docker`, e.g. by using a symlink: `sudo ln -s $(which podman) {some_known_path}/docker`.
-- Your project must contain a `.devcontainer/devcontainer.json` directory/file.
+- Your project must contain a dev container configuration file (see below).
+
+## Configuration File Locations {#config-locations}
+
+> **Note:** In Zed v0.224.0 and above, `.devcontainer.json` at the project root is supported in addition to the locations below.
+
+Zed supports dev container configurations in the following locations:
+
+1. `.devcontainer.json` in your project root
+2. `.devcontainer/devcontainer.json` (the standard location)
+3. `.devcontainer/<subfolder>/devcontainer.json` (for named configurations)
+
+When multiple configurations are present, Zed will prompt you to choose which one to use.
 
 ## Using Dev Containers in Zed
 
 ### Automatic prompt
 
-When you open a project that contains the `.devcontainer/devcontainer.json` directory/file, Zed will display a prompt asking whether to open the project inside the dev container. Choosing "Open in Container" will:
+When you open a project that contains a dev container configuration file, Zed will display a prompt asking whether to open the project inside the dev container. Choosing "Open in Container" will:
 
 1. Build the dev container image (if needed).
 2. Launch the container.
