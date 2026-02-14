@@ -1,6 +1,6 @@
 use crate::{
     FormatPromptArgs, PredictionProvider,
-    example::{ActualCursor, Example, ExamplePrompt},
+    example::{Example, ExamplePrompt},
     headless::EpAppState,
     progress::{ExampleProgress, Step},
     retrieve_context::run_context_retrieval,
@@ -145,7 +145,7 @@ pub fn zeta2_output_for_patch(
         old_editable_region.push('\n');
     }
 
-    let (mut result, first_hunk_offset) =
+    let (mut result, hunk_start) =
         udiff::apply_diff_to_string_with_hunk_offset(patch, &old_editable_region).with_context(
             || {
                 format!(
@@ -160,7 +160,6 @@ pub fn zeta2_output_for_patch(
     // the actual positions in the result. Insert in reverse order so earlier
     // insertions don't shift later offsets. For each selection, insert the cursor
     // marker at the end first, then the selection start marker (if non-empty).
-    let hunk_start = first_hunk_offset.unwrap_or(0);
     for selection in selections.iter().rev() {
         let end = (hunk_start + selection.end).min(result.len());
         result.insert_str(end, TeacherPrompt::USER_CURSOR_MARKER);
@@ -215,7 +214,7 @@ impl TeacherPrompt {
         prompt
     }
 
-    pub fn parse(example: &Example, response: &str) -> Result<(String, Vec<ActualCursor>)> {
+    pub fn parse(example: &Example, response: &str) -> Result<(String, Vec<Range<usize>>)> {
         // Extract updated (new) editable region from the model response.
         // The model may include editable region markers in its output, so we need to strip them.
         let new_editable_region = extract_last_codeblock(response);
@@ -282,21 +281,7 @@ impl TeacherPrompt {
             diff = diff,
         };
 
-        let actual_cursors = selection_ranges
-            .into_iter()
-            .map(|range| {
-                ActualCursor::from_editable_region(
-                    &example.spec.cursor_path,
-                    range,
-                    &new_editable_region,
-                    &prompt_inputs.content,
-                    editable_region_offset,
-                    editable_region_start_line,
-                )
-            })
-            .collect();
-
-        Ok((diff, actual_cursors))
+        Ok((diff, selection_ranges))
     }
 
     /// Extract all selection/cursor ranges from an editable region that still
@@ -677,6 +662,7 @@ mod tests {
                 expected_output: String::new(),
                 rejected_output: None,
                 provider: crate::PredictionProvider::Teacher(crate::TeacherBackend::Sonnet45),
+                prefill: None,
             }),
             predictions: Vec::new(),
             score: Vec::new(),
@@ -884,7 +870,7 @@ mod tests {
                 result.err()
             );
 
-            let (diff, actual_cursors) = result.unwrap();
+            let (diff, actual_selections) = result.unwrap();
 
             // Handle NO_EDITS case specially.
             if test_case.expected_new_region.is_empty() {
@@ -894,8 +880,8 @@ mod tests {
                     test_case.name
                 );
                 assert!(
-                    actual_cursors.is_empty(),
-                    "Test '{}': expected no cursors for NO_EDITS",
+                    actual_selections.is_empty(),
+                    "Test '{}': expected no selections for NO_EDITS",
                     test_case.name
                 );
                 continue;
@@ -911,12 +897,8 @@ mod tests {
                         )
                     });
 
-            let selections: Vec<std::ops::Range<usize>> = actual_cursors
-                .iter()
-                .filter_map(|c| c.editable_region_selection())
-                .collect();
             let actual_with_markers =
-                util::test::generate_marked_text(&actual_text, &selections, true);
+                util::test::generate_marked_text(&actual_text, &actual_selections, true);
 
             // Compare with expected.
             assert_eq!(
@@ -957,40 +939,37 @@ mod tests {
         "};
 
         let example = make_example(file_content, prompt_editable_region);
-        let (_, actual_cursors) = TeacherPrompt::parse(&example, response).unwrap();
+        let (_, actual_selections) = TeacherPrompt::parse(&example, response).unwrap();
 
         assert_eq!(
-            actual_cursors.len(),
+            actual_selections.len(),
             3,
-            "Expected 3 cursors (two selections + one empty cursor in body)"
+            "Expected 3 selections (two non-empty + one empty cursor in body)"
         );
 
         // First: selection over "item"
-        let first = &actual_cursors[0];
-        let first_sel = first.editable_region_selection().unwrap();
+        let first = &actual_selections[0];
         assert_ne!(
-            first_sel.start, first_sel.end,
-            "first cursor should be a non-empty selection"
+            first.start, first.end,
+            "first selection should be non-empty"
         );
 
         // Second: selection over "data.items()"
-        let second = &actual_cursors[1];
-        let second_sel = second.editable_region_selection().unwrap();
+        let second = &actual_selections[1];
         assert_ne!(
-            second_sel.start, second_sel.end,
-            "second cursor should be a non-empty selection"
+            second.start, second.end,
+            "second selection should be non-empty"
         );
 
         // Third: empty cursor in the loop body
-        let third = &actual_cursors[2];
-        let third_sel = third.editable_region_selection().unwrap();
+        let third = &actual_selections[2];
         assert_eq!(
-            third_sel.start, third_sel.end,
-            "third cursor should be an empty selection"
+            third.start, third.end,
+            "third selection should be empty (cursor only)"
         );
 
         // Verify the selections don't overlap and are in order
-        assert!(first_sel.end <= second_sel.start);
-        assert!(second_sel.end <= third_sel.start);
+        assert!(first.end <= second.start);
+        assert!(second.end <= third.start);
     }
 }

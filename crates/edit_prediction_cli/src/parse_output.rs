@@ -1,9 +1,4 @@
-use crate::{
-    PredictionProvider,
-    example::{ActualCursor, Example},
-    format_prompt::TeacherPrompt,
-    repair,
-};
+use crate::{PredictionProvider, example::Example, format_prompt::TeacherPrompt, repair};
 use anyhow::{Context as _, Result};
 use std::ops::Range;
 use zeta_prompt::{CURSOR_MARKER, ZetaFormat};
@@ -23,10 +18,10 @@ pub fn run_parse_output(example: &mut Example) -> Result<()> {
         .collect();
 
     for (ix, actual_output, provider) in to_parse {
-        let (actual_patch, actual_cursors) =
+        let (actual_patch, actual_selections) =
             parse_prediction_output(example, &actual_output, provider)?;
         example.predictions[ix].actual_patch = Some(actual_patch);
-        example.predictions[ix].actual_cursors = actual_cursors;
+        example.predictions[ix].actual_selections = actual_selections;
     }
 
     Ok(())
@@ -36,7 +31,7 @@ pub fn parse_prediction_output(
     example: &Example,
     actual_output: &str,
     provider: PredictionProvider,
-) -> Result<(String, Vec<ActualCursor>)> {
+) -> Result<(String, Vec<Range<usize>>)> {
     match provider {
         PredictionProvider::Teacher(_) | PredictionProvider::TeacherNonBatching(_) => {
             TeacherPrompt::parse(example, actual_output)
@@ -90,7 +85,7 @@ fn parse_zeta2_output(
     example: &Example,
     actual_output: &str,
     format: ZetaFormat,
-) -> Result<(String, Vec<ActualCursor>)> {
+) -> Result<(String, Vec<Range<usize>>)> {
     let prompt = &example.prompt.as_ref().context("prompt required")?.input;
     let prompt_inputs = example
         .prompt_inputs
@@ -161,21 +156,7 @@ fn parse_zeta2_output(
         path = example.spec.cursor_path.to_string_lossy(),
     );
 
-    let actual_cursors: Vec<ActualCursor> = selection_ranges
-        .into_iter()
-        .map(|selection: Range<usize>| {
-            ActualCursor::from_editable_region(
-                &example.spec.cursor_path,
-                selection,
-                &new_text,
-                &prompt_inputs.content,
-                editable_region_offset,
-                editable_region_start_line,
-            )
-        })
-        .collect();
-
-    Ok((formatted_diff, actual_cursors))
+    Ok((formatted_diff, selection_ranges))
 }
 
 #[cfg(test)]

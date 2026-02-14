@@ -9,7 +9,7 @@
 use crate::{
     BatchProvider, PredictionProvider,
     anthropic_client::AnthropicClient,
-    example::{ActualCursor, Example, ExamplePrediction},
+    example::{Example, ExamplePrediction},
     format_prompt::{TeacherPrompt, extract_last_codeblock},
     openai_client::OpenAiClient,
     parse_output::run_parse_output,
@@ -18,6 +18,7 @@ use crate::{
     word_diff::unified_to_word_diff,
 };
 use anyhow::{Context as _, Result};
+use std::ops::Range;
 use std::sync::OnceLock;
 
 const KEEP_PREVIOUS: &str = "KEEP_PREVIOUS";
@@ -209,7 +210,7 @@ pub fn needs_repair(example: &Example, confidence_threshold: u8) -> bool {
 ///
 /// Handles the `KEEP_PREVIOUS` sentinel by copying the teacher's prediction,
 /// and delegates normal output to `TeacherPrompt::parse`.
-pub fn parse(example: &Example, actual_output: &str) -> Result<(String, Vec<ActualCursor>)> {
+pub fn parse(example: &Example, actual_output: &str) -> Result<(String, Vec<Range<usize>>)> {
     let last_codeblock = extract_last_codeblock(actual_output);
     if last_codeblock.trim() == KEEP_PREVIOUS {
         let original = example
@@ -217,8 +218,8 @@ pub fn parse(example: &Example, actual_output: &str) -> Result<(String, Vec<Actu
             .first()
             .context("no original prediction to keep")?;
         let patch = original.actual_patch.clone().unwrap_or_default();
-        let cursors: Vec<ActualCursor> = original.actual_cursors.clone();
-        return Ok((patch, cursors));
+        let selections = original.actual_selections.clone();
+        return Ok((patch, selections));
     }
 
     TeacherPrompt::parse(example, actual_output)
@@ -398,12 +399,13 @@ pub async fn run_repair(
         .err()
         .map(|e| format!("Failed to parse repair response: {}", e));
 
-    let (actual_patch, actual_cursors) = parse_result.ok().unzip();
+    let (actual_patch, actual_selections): (Option<String>, Option<Vec<Range<usize>>>) =
+        parse_result.ok().unzip();
 
     example.predictions.push(ExamplePrediction {
         actual_patch,
         actual_output: response,
-        actual_cursors: actual_cursors.unwrap_or_default(),
+        actual_selections: actual_selections.unwrap_or_default(),
         error: err,
         provider: PredictionProvider::Repair,
     });

@@ -10,6 +10,7 @@ use http_client::Url;
 use language::{Anchor, Buffer};
 use project::Project;
 use serde::{Deserialize, Serialize};
+use std::ops::Range;
 use std::{
     borrow::Cow,
     collections::VecDeque,
@@ -100,99 +101,17 @@ pub struct ExamplePrediction {
     pub actual_patch: Option<String>,
     #[serde(deserialize_with = "deserialize_null_as_empty_string")]
     pub actual_output: String,
-    #[serde(
-        default,
-        alias = "actual_cursor",
-        deserialize_with = "deserialize_single_or_vec_or_null",
-        skip_serializing_if = "Vec::is_empty"
-    )]
-    pub actual_cursors: Vec<ActualCursor>,
+    /// Selection ranges within the new editable region (after marker stripping).
+    /// Each range represents a selection where `start..end` are byte offsets.
+    /// An empty selection (cursor only) has `start == end`.
+    ///
+    /// Because the actual patch is generated with full context (all lines of the
+    /// editable region), these offsets are also valid as hunk-content offsets.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub actual_selections: Vec<Range<usize>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
     pub provider: PredictionProvider,
-}
-
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-pub struct ActualCursor {
-    pub path: String,
-    pub row: u32,
-    pub column: u32,
-    pub offset: usize,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub editable_region_offset: Option<usize>,
-    /// The start offset of the selection (global byte offset).
-    /// If `None`, the selection is empty (cursor only).
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub selection_start_offset: Option<usize>,
-    /// The start offset of the selection within the editable region.
-    /// If `None`, the selection is empty (cursor only).
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub selection_start_editable_region_offset: Option<usize>,
-}
-
-impl ActualCursor {
-    /// Construct an `ActualCursor` from a selection range within the new editable region.
-    ///
-    /// - `path`: file path the cursor is in
-    /// - `editable_region_selection`: byte offset range of the selection within the new editable region text.
-    ///   For an empty selection (cursor only), use a range where start == end.
-    /// - `new_editable_region`: the full new editable region text (after marker removal)
-    /// - `content`: the full file content (before the edit)
-    /// - `editable_region_byte_offset`: byte offset where the editable region starts in `content`
-    /// - `editable_region_start_line`: 0-based line number where the editable region starts in `content`
-    pub fn from_editable_region(
-        path: &std::path::Path,
-        editable_region_selection: std::ops::Range<usize>,
-        new_editable_region: &str,
-        content: &str,
-        editable_region_byte_offset: usize,
-        editable_region_start_line: usize,
-    ) -> Self {
-        let editable_region_cursor_offset = editable_region_selection.end;
-        let global_offset = editable_region_byte_offset + editable_region_cursor_offset;
-        let new_region_prefix = &new_editable_region[..editable_region_cursor_offset];
-        let row = (editable_region_start_line + new_region_prefix.matches('\n').count()) as u32;
-        let column = match new_region_prefix.rfind('\n') {
-            Some(pos) => (editable_region_cursor_offset - pos - 1) as u32,
-            None => {
-                let content_prefix = &content[..editable_region_byte_offset];
-                let content_column = match content_prefix.rfind('\n') {
-                    Some(pos) => editable_region_byte_offset - pos - 1,
-                    None => editable_region_byte_offset,
-                };
-                (content_column + editable_region_cursor_offset) as u32
-            }
-        };
-
-        let is_empty_selection = editable_region_selection.start == editable_region_selection.end;
-        let (selection_start_offset, selection_start_editable_region_offset) = if is_empty_selection
-        {
-            (None, None)
-        } else {
-            let start_global = editable_region_byte_offset + editable_region_selection.start;
-            (Some(start_global), Some(editable_region_selection.start))
-        };
-
-        ActualCursor {
-            path: path.to_string_lossy().to_string(),
-            row,
-            column,
-            offset: global_offset,
-            editable_region_offset: Some(editable_region_cursor_offset),
-            selection_start_offset,
-            selection_start_editable_region_offset,
-        }
-    }
-
-    /// Returns the selection range within the editable region.
-    /// For an empty selection (cursor only), returns a range where start == end.
-    pub fn editable_region_selection(&self) -> Option<std::ops::Range<usize>> {
-        let cursor_offset = self.editable_region_offset?;
-        let start = self
-            .selection_start_editable_region_offset
-            .unwrap_or(cursor_offset);
-        Some(start..cursor_offset)
-    }
 }
 
 fn deserialize_null_as_empty_string<'de, D>(deserializer: D) -> Result<String, D::Error>
@@ -201,25 +120,6 @@ where
 {
     let opt = Option::<String>::deserialize(deserializer)?;
     Ok(opt.unwrap_or_default())
-}
-
-fn deserialize_single_or_vec_or_null<'de, D>(deserializer: D) -> Result<Vec<ActualCursor>, D::Error>
-where
-    D: serde::Deserializer<'de>,
-{
-    #[derive(Deserialize)]
-    #[serde(untagged)]
-    enum SingleOrVec {
-        Vec(Vec<ActualCursor>),
-        Single(ActualCursor),
-    }
-
-    let opt = Option::<SingleOrVec>::deserialize(deserializer)?;
-    Ok(match opt {
-        None => vec![],
-        Some(SingleOrVec::Vec(v)) => v,
-        Some(SingleOrVec::Single(c)) => vec![c],
-    })
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -416,108 +316,30 @@ fn parse_markdown_example(input: &str) -> Result<Example> {
 mod tests {
     use super::*;
 
-    fn cursor(path: &str, row: u32, column: u32, offset: usize) -> ActualCursor {
-        ActualCursor {
-            path: path.to_string(),
-            row,
-            column,
-            offset,
-            editable_region_offset: None,
-            selection_start_offset: None,
-            selection_start_editable_region_offset: None,
-        }
-    }
-
-    fn cursor_json(path: &str, row: u32, column: u32, offset: usize) -> String {
-        format!(r#"{{"path": "{path}", "row": {row}, "column": {column}, "offset": {offset}}}"#)
-    }
-
-    fn prediction_json(cursor_field: &str) -> String {
-        format!(r#"{{"actual_output": "output", {cursor_field}"provider": "Sweep"}}"#)
-    }
-
     #[test]
-    fn test_actual_cursors_deserialization() {
-        let c1 = cursor_json("src/a.rs", 1, 0, 10);
-        let c2 = cursor_json("src/b.rs", 2, 5, 20);
-
-        let cases: Vec<(&str, String, Vec<ActualCursor>)> = vec![
-            (
-                "legacy single object (actual_cursor)",
-                prediction_json(&format!(r#""actual_cursor": {c1}, "#)),
-                vec![cursor("src/a.rs", 1, 0, 10)],
-            ),
-            (
-                "legacy null (actual_cursor: null)",
-                prediction_json(r#""actual_cursor": null, "#),
-                vec![],
-            ),
-            ("missing field", prediction_json(""), vec![]),
-            (
-                "new array format (actual_cursors)",
-                prediction_json(&format!(r#""actual_cursors": [{c1}, {c2}], "#)),
-                vec![cursor("src/a.rs", 1, 0, 10), cursor("src/b.rs", 2, 5, 20)],
-            ),
-            (
-                "new null (actual_cursors: null)",
-                prediction_json(r#""actual_cursors": null, "#),
-                vec![],
-            ),
-            (
-                "empty array",
-                prediction_json(r#""actual_cursors": [], "#),
-                vec![],
-            ),
-            (
-                "legacy field name with array value",
-                prediction_json(&format!(r#""actual_cursor": [{c1}], "#)),
-                vec![cursor("src/a.rs", 1, 0, 10)],
-            ),
-        ];
-
-        for (name, json, expected) in cases {
-            let prediction: ExamplePrediction =
-                serde_json::from_str(&json).unwrap_or_else(|e| panic!("{name}: {e}"));
-            assert_eq!(prediction.actual_cursors, expected, "{name}");
-        }
-    }
-
-    #[test]
-    fn test_actual_cursors_roundtrip() {
+    fn test_actual_selections_roundtrip() {
         let empty_prediction = ExamplePrediction {
             actual_patch: None,
             actual_output: "output".to_string(),
-            actual_cursors: vec![],
+            actual_selections: vec![],
             error: None,
             provider: PredictionProvider::Sweep,
         };
         let empty_json = serde_json::to_value(&empty_prediction).unwrap();
-        assert!(empty_json.get("actual_cursors").is_none());
-        assert!(empty_json.get("actual_cursor").is_none());
+        assert!(empty_json.get("actual_selections").is_none());
 
-        let cursors = vec![
-            ActualCursor {
-                editable_region_offset: Some(5),
-                selection_start_offset: Some(8),
-                selection_start_editable_region_offset: Some(3),
-                ..cursor("src/a.rs", 1, 0, 10)
-            },
-            ActualCursor {
-                editable_region_offset: Some(45),
-                ..cursor("src/a.rs", 3, 4, 50)
-            },
-        ];
+        let selections = vec![3..5, 10..10, 20..25];
 
         let prediction = ExamplePrediction {
             actual_patch: Some("patch".to_string()),
             actual_output: "output".to_string(),
-            actual_cursors: cursors.clone(),
+            actual_selections: selections.clone(),
             error: None,
             provider: PredictionProvider::Sweep,
         };
 
         let json_str = serde_json::to_string(&prediction).unwrap();
-        let roundtripped: ExamplePrediction = serde_json::from_str(&json_str).unwrap();
-        assert_eq!(roundtripped.actual_cursors, cursors);
+        let roundtrip: ExamplePrediction = serde_json::from_str(&json_str).unwrap();
+        assert_eq!(roundtrip.actual_selections, selections);
     }
 }

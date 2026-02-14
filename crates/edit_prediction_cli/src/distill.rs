@@ -15,15 +15,7 @@ pub async fn run_distill(example: &mut Example) -> Result<()> {
 
     let expected_patches = predictions
         .into_iter()
-        .filter_map(|p| {
-            Some((
-                p.actual_patch.clone()?,
-                p.actual_cursors
-                    .iter()
-                    .filter_map(|c| c.editable_region_selection())
-                    .collect(),
-            ))
-        })
+        .filter_map(|p| Some((p.actual_patch.clone()?, p.actual_selections.clone())))
         .collect();
 
     example
