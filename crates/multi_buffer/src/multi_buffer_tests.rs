@@ -1259,12 +1259,22 @@ fn test_resolving_anchors_after_replacing_their_excerpts(cx: &mut App) {
         ),
         MultiBufferOffset(0)
     );
+    let unresolved_anchor = snapshot_1.anchor_after(MultiBufferOffset(5));
+    assert_eq!(
+        snapshot_2.summary_for_anchor::<MultiBufferOffset>(&unresolved_anchor),
+        MultiBufferOffset(0)
+    );
     assert_eq!(
         snapshot_2.summaries_for_anchors::<MultiBufferOffset, _>(&[
             snapshot_1.anchor_before(MultiBufferOffset(2)),
-            snapshot_1.anchor_after(MultiBufferOffset(3))
+            snapshot_1.anchor_after(MultiBufferOffset(3)),
+            unresolved_anchor,
         ]),
-        vec![MultiBufferOffset(0), MultiBufferOffset(0)]
+        vec![
+            MultiBufferOffset(0),
+            MultiBufferOffset(0),
+            MultiBufferOffset(0)
+        ]
     );
 
     // Refresh anchors from the old snapshot. The return value indicates that both
@@ -1272,12 +1282,14 @@ fn test_resolving_anchors_after_replacing_their_excerpts(cx: &mut App) {
     let refresh = snapshot_2.refresh_anchors(&[
         snapshot_1.anchor_before(MultiBufferOffset(2)),
         snapshot_1.anchor_after(MultiBufferOffset(3)),
+        unresolved_anchor,
     ]);
     assert_eq!(
         refresh,
         &[
             (0, snapshot_2.anchor_before(MultiBufferOffset(0)), false),
             (1, snapshot_2.anchor_after(MultiBufferOffset(0)), false),
+            (2, snapshot_2.anchor_after(MultiBufferOffset(0)), false),
         ]
     );
 

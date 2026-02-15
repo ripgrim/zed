@@ -5183,6 +5183,9 @@ impl MultiBufferSnapshot {
                 if excerpt.id != excerpt_id && excerpt_id != ExcerptId::max() {
                     return excerpt_start_position.0;
                 }
+                if !excerpt.buffer.can_resolve(&anchor.text_anchor) {
+                    return excerpt_start_position.0;
+                }
                 let excerpt_buffer_start = excerpt
                     .range
                     .context
@@ -5215,6 +5218,13 @@ impl MultiBufferSnapshot {
             let excerpt_start_position = ExcerptDimension(start);
             if let Some(excerpt) = item {
                 if excerpt.id != excerpt_id && excerpt_id != ExcerptId::max() {
+                    return self.resolve_summary_for_anchor(
+                        &Anchor::min(),
+                        excerpt_start_position,
+                        &mut diff_transforms_cursor,
+                    );
+                }
+                if !excerpt.buffer.can_resolve(&anchor.text_anchor) {
                     return self.resolve_summary_for_anchor(
                         &Anchor::min(),
                         excerpt_start_position,
@@ -5405,12 +5415,14 @@ impl MultiBufferSnapshot {
                     .context
                     .end
                     .summary::<MBD::TextDimension>(&excerpt.buffer);
-                for (buffer_summary, anchor) in excerpt
-                    .buffer
-                    .summaries_for_anchors_with_payload::<MBD::TextDimension, _, _>(
-                        excerpt_anchors.map(|a| (&a.text_anchor, a)),
-                    )
-                {
+                for anchor in excerpt_anchors.collect_vec() {
+                    let buffer_summary = if excerpt.buffer.can_resolve(&anchor.text_anchor) {
+                        anchor
+                            .text_anchor
+                            .summary::<MBD::TextDimension>(&excerpt.buffer)
+                    } else {
+                        excerpt_buffer_start
+                    };
                     let summary = cmp::min(excerpt_buffer_end, buffer_summary);
                     let mut position = excerpt_start_position;
                     if summary > excerpt_buffer_start {
