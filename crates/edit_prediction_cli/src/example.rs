@@ -134,6 +134,13 @@ pub struct ExampleScore {
     pub exact_lines_fn: usize,
     #[serde(default)]
     pub reversal_ratio: f32,
+    /// Edit distance between actual and expected text (character-level).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub edit_distance: Option<usize>,
+    /// Edit distance as a percentage: 100 * (original_to_expected - actual_to_expected) / original_to_expected.
+    /// 100% means perfect prediction, 0% means no progress, negative means made things worse.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub edit_distance_percentage: Option<f32>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cursor_distance: Option<usize>,
     #[serde(default, skip_serializing_if = "Option::is_none")]

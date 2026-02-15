@@ -330,6 +330,44 @@ fn count_ngrams(text: &str, n: usize) -> Counts {
     counts
 }
 
+/// Computes the edit distance (sum of deleted + added bytes) between two strings,
+/// ignoring whitespace differences and edits within selections.
+///
+/// Takes a pre-computed diff, the actual text, and the actual selections.
+/// For each edit, strips whitespace from both the deleted and inserted text before comparing.
+/// Edits that fall entirely within a selection are skipped, since selections indicate
+/// uncertain regions where the model expects the user to make changes.
+pub fn whitespace_normalized_edit_distance<S: AsRef<str>>(
+    diff: &[(Range<usize>, S)],
+    actual: &str,
+    actual_selections: &[Range<usize>],
+) -> usize {
+    diff.iter()
+        .map(|(old_range, new_text)| {
+            // Skip edits that are entirely within a selection (uncertain region)
+            let is_within_selection = actual_selections
+                .iter()
+                .any(|sel| sel.start <= old_range.start && old_range.end <= sel.end);
+            if is_within_selection {
+                return 0;
+            }
+
+            let old_text = &actual[old_range.clone()];
+            let old_normalized: String = old_text.split_whitespace().collect::<Vec<_>>().join(" ");
+            let new_normalized: String = new_text
+                .as_ref()
+                .split_whitespace()
+                .collect::<Vec<_>>()
+                .join(" ");
+            if old_normalized == new_normalized {
+                0
+            } else {
+                old_normalized.len() + new_normalized.len()
+            }
+        })
+        .sum()
+}
+
 pub fn braces_disbalance(text: &str) -> usize {
     let mut disbalance = 0isize;
 
@@ -654,6 +692,7 @@ mod test_optimization {
 mod test {
     use super::*;
     use indoc::indoc;
+    use language::text_diff;
 
     #[test]
     fn test_delta_chr_f_perfect_match() {
@@ -1004,5 +1043,77 @@ index abc123..def456 100644
             "x",
             1
         ));
+    }
+
+    #[test]
+    fn test_whitespace_normalized_edit_distance_identical() {
+        let actual = "fn main() { println!(\"hello\"); }";
+        let expected = "fn main() { println!(\"hello\"); }";
+        let diff = text_diff(actual, expected);
+        assert_eq!(whitespace_normalized_edit_distance(&diff, actual, &[]), 0);
+    }
+
+    #[test]
+    fn test_whitespace_normalized_edit_distance_whitespace_only_diff() {
+        // These differ only in whitespace/formatting
+        let actual = "entry.language";
+        let expected = "entry\n            .language";
+        let diff = text_diff(actual, expected);
+        assert_eq!(whitespace_normalized_edit_distance(&diff, actual, &[]), 0);
+    }
+
+    #[test]
+    fn test_whitespace_normalized_edit_distance_with_indentation_diff() {
+        let actual = "    let x = 1;";
+        let expected = "        let x = 1;";
+        let diff = text_diff(actual, expected);
+        assert_eq!(whitespace_normalized_edit_distance(&diff, actual, &[]), 0);
+    }
+
+    #[test]
+    fn test_whitespace_normalized_edit_distance_real_diff() {
+        let actual = "let x = 42;";
+        let expected = "let x = 100;";
+        let diff = text_diff(actual, expected);
+        // "42" -> "100" is 2 deleted + 3 added = 5
+        assert_eq!(whitespace_normalized_edit_distance(&diff, actual, &[]), 5);
+    }
+
+    #[test]
+    fn test_whitespace_normalized_edit_distance_real_diff_with_whitespace() {
+        // Same real diff but with different formatting
+        let actual = "let x = 42;";
+        let expected = "let x =\n    100;";
+        let diff = text_diff(actual, expected);
+        // Should still be 5 (only "42" -> "100" matters)
+        assert_eq!(whitespace_normalized_edit_distance(&diff, actual, &[]), 5);
+    }
+
+    #[test]
+    fn test_whitespace_normalized_edit_distance_skips_selection() {
+        // Edit within selection should be skipped
+        let actual = "import module";
+        let expected = "import other";
+        let diff = text_diff(actual, expected);
+        // Without selection: "module" (6) + "other" (5) = 11
+        assert_eq!(whitespace_normalized_edit_distance(&diff, actual, &[]), 11);
+        // With selection covering "module" (bytes 7..13), the edit is skipped
+        assert_eq!(
+            whitespace_normalized_edit_distance(&diff, actual, &[7..13]),
+            0
+        );
+    }
+
+    #[test]
+    fn test_whitespace_normalized_edit_distance_partial_selection_not_skipped() {
+        // Edit only partially within selection should NOT be skipped
+        let actual = "import module";
+        let expected = "import other";
+        let diff = text_diff(actual, expected);
+        // Selection only covers part of "module"
+        assert_eq!(
+            whitespace_normalized_edit_distance(&diff, actual, &[7..10]),
+            11
+        );
     }
 }

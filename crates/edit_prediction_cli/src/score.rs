@@ -68,6 +68,8 @@ pub fn run_scoring_impl(example: &mut Example) -> anyhow::Result<()> {
         exact_lines_fp: 0,
         exact_lines_fn: 0,
         reversal_ratio: 0.0,
+        edit_distance: None,
+        edit_distance_percentage: None,
         cursor_distance: None,
         cursor_exact_match: None,
         selection_start_distance: None,
@@ -108,7 +110,8 @@ pub fn run_scoring_impl(example: &mut Example) -> anyhow::Result<()> {
             .map(|s| (actual_hunk_offset + s.start)..(actual_hunk_offset + s.end))
             .collect();
 
-        let mut best_edit_distance = f64::INFINITY;
+        let mut best_edit_distance: Option<usize> = None;
+        let mut best_original_to_expected_distance: Option<usize> = None;
         let mut best_delta_chr_f = 0.0f32;
         let mut best_selection_metrics = SelectionMetrics {
             cursor_distance: None,
@@ -119,25 +122,45 @@ pub fn run_scoring_impl(example: &mut Example) -> anyhow::Result<()> {
 
         for (expected_text, expected_selections) in &expected_texts_and_selections {
             let actual_to_expected_diff = text_diff(&actual_text, expected_text);
+            let original_to_expected_diff = text_diff(original_text, expected_text);
             let mapped_selections: Vec<Range<usize>> = actual_selections
                 .iter()
-                .map(|s| map_selection_through_diff(&actual_text, expected_text, s.clone()))
+                .map(|s| map_selection_through_diff(&actual_to_expected_diff, s.clone()))
                 .collect();
 
             // Compute cursor metrics by comparing mapped selections to expected selections
             let selection_metrics =
                 compute_cursor_metrics_from_mapped(expected_selections, &mapped_selections);
 
-            // Compute edit distance with 90% discount for edits within correctly-predicted selections
-            let edit_distance = compute_discounted_edit_distance(
+            // Filter to only correctly-predicted selections (where mapped selection matches expected)
+            let correct_selections: Vec<Range<usize>> = actual_selections
+                .iter()
+                .zip(mapped_selections.iter())
+                .filter(|(_, mapped)| expected_selections.iter().any(|exp| exp == *mapped))
+                .map(|(actual, _)| actual.clone())
+                .collect();
+
+            // Compute edit distance ignoring whitespace differences and edits within correct selections
+            let edit_distance = metrics::whitespace_normalized_edit_distance(
                 &actual_to_expected_diff,
-                &actual_selections,
-                &mapped_selections,
-                &expected_selections,
+                &actual_text,
+                &correct_selections,
             );
 
-            if edit_distance < best_edit_distance {
-                best_edit_distance = edit_distance;
+            // Compute original to expected distance (discounting expected selections as uncertain regions)
+            let original_to_expected_distance = metrics::whitespace_normalized_edit_distance(
+                &original_to_expected_diff,
+                original_text,
+                expected_selections,
+            );
+
+            let is_better = best_edit_distance
+                .map(|best| edit_distance < best)
+                .unwrap_or(true);
+
+            if is_better {
+                best_edit_distance = Some(edit_distance);
+                best_original_to_expected_distance = Some(original_to_expected_distance);
                 best_selection_metrics = selection_metrics;
                 // Compute delta_chr_f for this best match
                 best_delta_chr_f =
@@ -178,6 +201,21 @@ pub fn run_scoring_impl(example: &mut Example) -> anyhow::Result<()> {
             editable_region_start_line,
         );
 
+        // Compute edit distance percentage: 100 * (original_to_expected - actual_to_expected) / original_to_expected
+        let edit_distance_percentage =
+            match (best_edit_distance, best_original_to_expected_distance) {
+                (Some(actual_to_expected), Some(original_to_expected))
+                    if original_to_expected > 0 =>
+                {
+                    Some(
+                        100.0 * (original_to_expected as f32 - actual_to_expected as f32)
+                            / original_to_expected as f32,
+                    )
+                }
+                (Some(0), Some(0)) => Some(100.0), // Both zero means perfect match (no edit needed)
+                _ => None,
+            };
+
         scores.push(ExampleScore {
             delta_chr_f: best_delta_chr_f,
             braces_disbalance,
@@ -185,6 +223,8 @@ pub fn run_scoring_impl(example: &mut Example) -> anyhow::Result<()> {
             exact_lines_fp: best_exact_lines.false_positives,
             exact_lines_fn: best_exact_lines.false_negatives,
             reversal_ratio,
+            edit_distance: best_edit_distance,
+            edit_distance_percentage,
             cursor_distance: best_selection_metrics.cursor_distance,
             cursor_exact_match: best_selection_metrics.cursor_exact_match,
             selection_start_distance: best_selection_metrics.selection_start_distance,
@@ -196,49 +236,6 @@ pub fn run_scoring_impl(example: &mut Example) -> anyhow::Result<()> {
 
     example.score = scores;
     Ok(())
-}
-
-/// Computes the edit distance between actual and expected text, with a 90% discount
-/// for edits that fall entirely within correctly-predicted selections.
-///
-/// The diff should be from actual_text to expected_text, so old_range is in actual coordinates.
-fn compute_discounted_edit_distance(
-    diff: &[(Range<usize>, std::sync::Arc<str>)],
-    actual_selections: &[Range<usize>],
-    mapped_selections: &[Range<usize>],
-    expected_selections: &[Range<usize>],
-) -> f64 {
-    // A selection is "correctly predicted" if its mapped version matches the expected selection
-    let correctly_predicted: Vec<bool> = mapped_selections
-        .iter()
-        .zip(expected_selections.iter())
-        .map(|(mapped, expected)| mapped == expected)
-        .collect();
-
-    let mut total_distance = 0.0;
-
-    for (old_range, new_text) in diff {
-        let deleted_bytes = old_range.len();
-        let added_bytes = new_text.len();
-        let edit_distance = (deleted_bytes + added_bytes) as f64;
-
-        // Check if this edit is fully contained within a correctly-predicted selection
-        // The old_range is in the actual text coordinate space
-        let is_in_correct_selection = actual_selections
-            .iter()
-            .zip(correctly_predicted.iter())
-            .any(|(selection, &is_correct)| {
-                is_correct && old_range.start >= selection.start && old_range.end <= selection.end
-            });
-
-        if is_in_correct_selection {
-            total_distance += edit_distance * 0.1; // 90% discount
-        } else {
-            total_distance += edit_distance;
-        }
-    }
-
-    total_distance
 }
 
 /// Result of comparing expected and actual selection ranges.
@@ -259,22 +256,20 @@ struct SelectionMetrics {
 /// This allows comparing selections even when the actual and expected texts differ slightly
 /// (e.g., different placeholder variable names). If the selection covers a region that was
 /// changed, it maps to the corresponding changed region in the expected text.
-fn map_selection_through_diff(
-    actual_text: &str,
-    expected_text: &str,
+fn map_selection_through_diff<S: AsRef<str>>(
+    edits: &[(Range<usize>, S)],
     actual_selection: Range<usize>,
 ) -> Range<usize> {
-    if actual_text == expected_text {
+    if edits.is_empty() {
         return actual_selection;
     }
-
-    let edits = language::text_diff(actual_text, expected_text);
 
     let map_position = |actual_pos: usize| -> usize {
         let mut actual_cursor = 0usize;
         let mut expected_cursor = 0usize;
 
-        for (old_range, new_text) in &edits {
+        for (old_range, new_text) in edits {
+            let new_text = new_text.as_ref();
             // Check if position is in the unchanged region before this edit.
             if actual_pos < old_range.start {
                 return expected_cursor + (actual_pos - actual_cursor);
