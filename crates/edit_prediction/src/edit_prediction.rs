@@ -75,6 +75,9 @@ pub mod zeta2;
 #[cfg(test)]
 mod edit_prediction_tests;
 
+#[cfg(test)]
+mod diagnostic_dedup_tests;
+
 use crate::license_detection::LicenseDetectionWatcher;
 use crate::mercury::Mercury;
 use crate::ollama::Ollama;
@@ -1535,7 +1538,7 @@ impl EditPredictionStore {
             return;
         };
 
-        let diagnostic_hash =
+        let Some(diagnostic_hash) =
             project_state
                 .active_buffer(&project, cx)
                 .map(|(buffer, position)| {
@@ -1544,14 +1547,14 @@ impl EditPredictionStore {
                         .map(|pos| pos.to_point(&snapshot))
                         .unwrap_or_default();
                     Self::diagnostic_state_hash(&snapshot, cursor_point)
-                });
-        if diagnostic_hash.is_some() && project_state.last_diagnostic_state_hash == diagnostic_hash
-        {
+                })
+        else {
+            return;
+        };
+        if project_state.last_diagnostic_state_hash == Some(diagnostic_hash) {
             return;
         }
-        project_state.last_diagnostic_state_hash = diagnostic_hash;
-
-        let last_diagnostic_jump_target = project_state.last_diagnostic_jump_target;
+        project_state.last_diagnostic_state_hash = Some(diagnostic_hash);
 
         self.queue_prediction_refresh(project.clone(), project.entity_id(), cx, move |this, cx| {
             let Some((active_buffer, snapshot, cursor_point)) = this
@@ -1595,16 +1598,21 @@ impl EditPredictionStore {
                 });
                 let jump_buffer_id = jump_buffer.entity_id();
 
-                if last_diagnostic_jump_target == Some((jump_buffer_id, jump_point)) {
+                let should_skip = this.update(cx, |this, _cx| {
+                    let Some(project_state) = this.projects.get_mut(&project.entity_id()) else {
+                        return true;
+                    };
+                    if project_state.last_diagnostic_jump_target
+                        == Some((jump_buffer_id, jump_point))
+                    {
+                        return true;
+                    }
+                    project_state.last_diagnostic_jump_target = Some((jump_buffer_id, jump_point));
+                    false
+                })?;
+                if should_skip {
                     return anyhow::Ok(None);
                 }
-
-                this.update(cx, |this, _cx| {
-                    if let Some(project_state) = this.projects.get_mut(&project.entity_id()) {
-                        project_state.last_diagnostic_jump_target =
-                            Some((jump_buffer_id, jump_point));
-                    }
-                })?;
 
                 let Some(prediction_result) = this
                     .update(cx, |this, cx| {
