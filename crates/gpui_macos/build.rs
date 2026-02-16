@@ -126,14 +126,7 @@ fn generate_shader_bindings() -> PathBuf {
 
 /// Locate the gpui crate directory relative to this crate.
 fn find_gpui_crate_dir() -> PathBuf {
-    let manifest_dir = PathBuf::from(env::var("CARGO_MANIFEST_DIR").unwrap());
-    let gpui_dir = manifest_dir.parent().unwrap().join("gpui");
-    assert!(
-        gpui_dir.join("src").exists(),
-        "Expected gpui crate at {}, but it doesn't exist",
-        gpui_dir.display()
-    );
-    gpui_dir
+    gpui::GPUI_MANIFEST_DIR.into()
 }
 
 /// To enable runtime compilation, we need to "stitch" the shaders file with the generated header

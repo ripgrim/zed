@@ -58,3 +58,4 @@ uuid.workspace = true
 [build-dependencies]
 bindgen = "0.71"
 cbindgen = { version = "0.28.0", default-features = false }
+gpui.workspace = true

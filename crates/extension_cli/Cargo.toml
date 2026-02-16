@@ -20,6 +20,7 @@ env_logger.workspace = true
 extension.workspace = true
 fs.workspace = true
 gpui.workspace = true
+gpui_platform.workspace = true
 language.workspace = true
 log.workspace = true
 reqwest_client.workspace = true

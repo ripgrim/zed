@@ -5,6 +5,11 @@ pub use gpui::Platform;
 
 use std::rc::Rc;
 
+/// Returns a background executor for the current platform.
+pub fn background_executor() -> gpui::BackgroundExecutor {
+    current_platform(true).background_executor()
+}
+
 /// Returns the default [`Platform`] for the current OS.
 pub fn current_platform(headless: bool) -> Rc<dyn Platform> {
     #[cfg(target_os = "macos")]

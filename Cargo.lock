@@ -5839,7 +5839,7 @@ dependencies = [
 name = "eval_utils"
 version = "0.1.0"
 dependencies = [
- "gpui",
+ "gpui_platform",
  "serde",
  "smol",
 ]
@@ -5957,6 +5957,7 @@ dependencies = [
  "extension",
  "fs",
  "gpui",
+ "gpui_platform",
  "language",
  "log",
  "reqwest_client",

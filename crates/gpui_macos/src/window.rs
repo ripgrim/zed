@@ -517,9 +517,14 @@ impl MacWindowState {
     }
 
     fn is_maximized(&self) -> bool {
+        fn rect_to_size(rect: NSRect) -> Size<Pixels> {
+            let NSSize { width, height } = rect.size;
+            size(width.into(), height.into())
+        }
+
         unsafe {
             let bounds = self.bounds();
-            let screen_size = self.native_window.screen().visibleFrame().into();
+            let screen_size = rect_to_size(self.native_window.screen().visibleFrame());
             bounds.size == screen_size
         }
     }
@@ -2194,13 +2199,20 @@ extern "C" fn view_did_change_backing_properties(this: &Object, _: Sel) {
 }
 
 extern "C" fn set_frame_size(this: &Object, _: Sel, size: NSSize) {
+    fn convert(value: NSSize) -> Size<Pixels> {
+        Size {
+            width: px(value.width as f32),
+            height: px(value.height as f32),
+        }
+    }
+
     let window_state = unsafe { get_window_state(this) };
     let mut lock = window_state.as_ref().lock();
 
-    let new_size = Size::<Pixels>::from(size);
+    let new_size = convert(size);
     let old_size = unsafe {
         let old_frame: NSRect = msg_send![this, frame];
-        Size::<Pixels>::from(old_frame.size)
+        convert(old_frame.size)
     };
 
     if old_size == new_size {

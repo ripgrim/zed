@@ -25,7 +25,7 @@ pub type DrawOrder = u32;
 #[derive(Default)]
 #[expect(missing_docs)]
 pub struct Scene {
-    pub paint_operations: Vec<PaintOperation>,
+    pub(crate) paint_operations: Vec<PaintOperation>,
     primitive_bounds: BoundsTree<ScaledPixels>,
     layer_stack: Vec<DrawOrder>,
     pub shadows: Vec<Shadow>,
