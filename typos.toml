@@ -57,7 +57,7 @@ extend-exclude = [
     # Some multibuffer test cases have word fragments that register as typos
     "crates/multi_buffer/src/multi_buffer_tests.rs",
     # Macos apis
-    "crates/gpui/src/platform/mac/dispatcher.rs",
+    "crates/gpui_macos/src/dispatcher.rs",
     # Tests contain partially incomplete words (by design)
     "crates/edit_prediction_cli/src/split_commit.rs",
     # Tests contain `baˇr` that cause `"ba" should be "by" or "be".`-like false-positives
