@@ -41,7 +41,8 @@ pub struct FontId(pub usize);
 #[derive(Hash, PartialEq, Eq, Clone, Copy, Debug)]
 pub struct FontFamilyId(pub usize);
 
-pub(crate) const SUBPIXEL_VARIANTS_X: u8 = 4;
+/// Number of subpixel glyph variants along the X axis.
+pub const SUBPIXEL_VARIANTS_X: u8 = 4;
 
 pub(crate) const SUBPIXEL_VARIANTS_Y: u8 =
     if cfg!(target_os = "windows") || cfg!(target_os = "linux") {
@@ -955,8 +956,9 @@ impl FontMetrics {
     }
 }
 
+/// Maps well-known virtual font names to their concrete equivalents.
 #[allow(unused)]
-pub(crate) fn font_name_with_fallbacks<'a>(name: &'a str, system: &'a str) -> &'a str {
+pub fn font_name_with_fallbacks<'a>(name: &'a str, system: &'a str) -> &'a str {
     // Note: the "Zed Plex" fonts were deprecated as we are not allowed to use "Plex"
     // in a derived font name. They are essentially indistinguishable from IBM Plex/Lilex,
     // and so retained here for backward compatibility.

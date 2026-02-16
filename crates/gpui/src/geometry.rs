@@ -1602,7 +1602,7 @@ impl Size<DevicePixels> {
 
 impl Size<Pixels> {
     /// Converts the size from logical to physical pixels.
-    pub(crate) fn to_device_pixels(self, scale_factor: f32) -> Size<DevicePixels> {
+    pub fn to_device_pixels(self, scale_factor: f32) -> Size<DevicePixels> {
         size(
             DevicePixels((self.width.0 * scale_factor).round() as i32),
             DevicePixels((self.height.0 * scale_factor).round() as i32),
@@ -2682,6 +2682,11 @@ impl Pixels {
     pub const MAX: Pixels = Pixels(f32::MAX);
     /// The minimum value that can be represented by `Pixels`.
     pub const MIN: Pixels = Pixels(f32::MIN);
+
+    /// Returns the raw `f32` value of this `Pixels`.
+    pub fn as_f32(self) -> f32 {
+        self.0
+    }
 
     /// Floors the `Pixels` value to the nearest whole number.
     ///

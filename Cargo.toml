@@ -83,6 +83,7 @@ members = [
     "crates/go_to_line",
     "crates/google_ai",
     "crates/gpui",
+    "crates/gpui_macos",
     "crates/gpui_macros",
     "crates/gpui_platform",
     "crates/gpui_windows",
@@ -323,6 +324,7 @@ git_ui = { path = "crates/git_ui" }
 go_to_line = { path = "crates/go_to_line" }
 google_ai = { path = "crates/google_ai" }
 gpui = { path = "crates/gpui", default-features = false }
+gpui_macos = { path = "crates/gpui_macos", default-features = false }
 gpui_macros = { path = "crates/gpui_macros" }
 gpui_platform = { path = "crates/gpui_platform", default-features = false }
 gpui_windows = { path = "crates/gpui_windows", default-features = false }

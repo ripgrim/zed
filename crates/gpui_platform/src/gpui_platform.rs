@@ -7,9 +7,9 @@ use std::rc::Rc;
 
 /// Returns the default [`Platform`] for the current OS.
 pub fn current_platform(headless: bool) -> Rc<dyn Platform> {
-    #[cfg(not(target_os = "windows"))]
+    #[cfg(target_os = "macos")]
     {
-        gpui::current_platform(headless)
+        Rc::new(gpui_macos::MacPlatform::new(headless))
     }
 
     #[cfg(target_os = "windows")]
@@ -18,5 +18,10 @@ pub fn current_platform(headless: bool) -> Rc<dyn Platform> {
             gpui_windows::WindowsPlatform::new(headless)
                 .expect("failed to initialize Windows platform"),
         )
+    }
+
+    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
+    {
+        gpui::current_platform(headless)
     }
 }

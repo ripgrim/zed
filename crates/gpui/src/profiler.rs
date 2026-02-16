@@ -26,7 +26,8 @@ pub struct ThreadTaskTimings {
 }
 
 impl ThreadTaskTimings {
-    pub(crate) fn convert(timings: &[GlobalThreadTimings]) -> Vec<Self> {
+    /// Convert global thread timings into their structured format.
+    pub fn convert(timings: &[GlobalThreadTimings]) -> Vec<Self> {
         timings
             .iter()
             .filter_map(|t| match t.timings.upgrade() {

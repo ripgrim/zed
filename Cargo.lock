@@ -7472,6 +7472,48 @@ dependencies = [
 ]
 
 [[package]]
+name = "gpui_macos"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "async-task",
+ "bindgen 0.71.1",
+ "block",
+ "cbindgen",
+ "cocoa 0.26.0",
+ "cocoa-foundation 0.2.0",
+ "collections",
+ "core-foundation 0.10.0",
+ "core-foundation-sys",
+ "core-graphics 0.24.0",
+ "core-text",
+ "core-video",
+ "ctor",
+ "derive_more 0.99.20",
+ "etagere",
+ "foreign-types 0.5.0",
+ "futures 0.3.31",
+ "gpui",
+ "image",
+ "itertools 0.14.0",
+ "libc",
+ "log",
+ "mach2 0.5.0",
+ "media",
+ "metal 0.29.0",
+ "objc",
+ "parking_lot",
+ "pathfinder_geometry",
+ "raw-window-handle",
+ "semver",
+ "smallvec",
+ "strum 0.27.2",
+ "util",
+ "uuid",
+ "zed-font-kit",
+]
+
+[[package]]
 name = "gpui_macros"
 version = "0.1.0"
 dependencies = [
@@ -7487,6 +7529,7 @@ name = "gpui_platform"
 version = "0.1.0"
 dependencies = [
  "gpui",
+ "gpui_macos",
  "gpui_windows",
 ]
 

@@ -364,6 +364,19 @@ pub struct ScreenCaptureFrame(pub PlatformScreenCaptureFrame);
 #[derive(PartialEq, Eq, Hash, Copy, Clone)]
 pub struct DisplayId(pub(crate) u32);
 
+impl DisplayId {
+    /// Create a new `DisplayId` from a raw platform display identifier.
+    pub fn new(id: u32) -> Self {
+        Self(id)
+    }
+}
+
+impl From<u32> for DisplayId {
+    fn from(id: u32) -> Self {
+        Self(id)
+    }
+}
+
 impl From<DisplayId> for u32 {
     fn from(id: DisplayId) -> Self {
         id.0
@@ -839,7 +852,8 @@ impl AtlasKey {
         ),
         allow(dead_code)
     )]
-    pub(crate) fn texture_kind(&self) -> AtlasTextureKind {
+    /// Returns the texture kind for this atlas key.
+    pub fn texture_kind(&self) -> AtlasTextureKind {
         match self {
             AtlasKey::Glyph(params) => {
                 if params.is_emoji {
@@ -997,7 +1011,7 @@ impl PlatformInputHandler {
         Self { cx, handler }
     }
 
-    fn selected_text_range(&mut self, ignore_disabled_input: bool) -> Option<UTF16Selection> {
+    pub fn selected_text_range(&mut self, ignore_disabled_input: bool) -> Option<UTF16Selection> {
         self.cx
             .update(|window, cx| {
                 self.handler
@@ -1008,7 +1022,7 @@ impl PlatformInputHandler {
     }
 
     #[cfg_attr(target_os = "windows", allow(dead_code))]
-    fn marked_text_range(&mut self) -> Option<Range<usize>> {
+    pub fn marked_text_range(&mut self) -> Option<Range<usize>> {
         self.cx
             .update(|window, cx| self.handler.marked_text_range(window, cx))
             .ok()
@@ -1019,7 +1033,7 @@ impl PlatformInputHandler {
         any(target_os = "linux", target_os = "freebsd", target_os = "windows"),
         allow(dead_code)
     )]
-    fn text_for_range(
+    pub fn text_for_range(
         &mut self,
         range_utf16: Range<usize>,
         adjusted: &mut Option<Range<usize>>,
@@ -1033,7 +1047,7 @@ impl PlatformInputHandler {
             .flatten()
     }
 
-    fn replace_text_in_range(&mut self, replacement_range: Option<Range<usize>>, text: &str) {
+    pub fn replace_text_in_range(&mut self, replacement_range: Option<Range<usize>>, text: &str) {
         self.cx
             .update(|window, cx| {
                 self.handler
@@ -1062,13 +1076,13 @@ impl PlatformInputHandler {
     }
 
     #[cfg_attr(target_os = "windows", allow(dead_code))]
-    fn unmark_text(&mut self) {
+    pub fn unmark_text(&mut self) {
         self.cx
             .update(|window, cx| self.handler.unmark_text(window, cx))
             .ok();
     }
 
-    fn bounds_for_range(&mut self, range_utf16: Range<usize>) -> Option<Bounds<Pixels>> {
+    pub fn bounds_for_range(&mut self, range_utf16: Range<usize>) -> Option<Bounds<Pixels>> {
         self.cx
             .update(|window, cx| self.handler.bounds_for_range(range_utf16, window, cx))
             .ok()
@@ -1076,11 +1090,11 @@ impl PlatformInputHandler {
     }
 
     #[allow(dead_code)]
-    fn apple_press_and_hold_enabled(&mut self) -> bool {
+    pub fn apple_press_and_hold_enabled(&mut self) -> bool {
         self.handler.apple_press_and_hold_enabled()
     }
 
-    pub(crate) fn dispatch_input(&mut self, input: &str, window: &mut Window, cx: &mut App) {
+    pub fn dispatch_input(&mut self, input: &str, window: &mut Window, cx: &mut App) {
         self.handler.replace_text_in_range(None, input, window, cx);
     }
 
@@ -1106,7 +1120,7 @@ impl PlatformInputHandler {
     }
 
     #[allow(dead_code)]
-    pub(crate) fn accepts_text_input(&mut self, window: &mut Window, cx: &mut App) -> bool {
+    pub fn accepts_text_input(&mut self, window: &mut Window, cx: &mut App) -> bool {
         self.handler.accepts_text_input(window, cx)
     }
 }
@@ -1539,8 +1553,9 @@ impl PromptButton {
         PromptButton::Cancel(label.into())
     }
 
+    /// Returns true if this button is a cancel button.
     #[allow(dead_code)]
-    pub(crate) fn is_cancel(&self) -> bool {
+    pub fn is_cancel(&self) -> bool {
         matches!(self, PromptButton::Cancel(_))
     }
 
@@ -1658,7 +1673,8 @@ pub enum CursorStyle {
 /// A clipboard item that should be copied to the clipboard
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ClipboardItem {
-    entries: Vec<ClipboardEntry>,
+    /// The entries in this clipboard item.
+    pub entries: Vec<ClipboardEntry>,
 }
 
 /// Either a ClipboardString or a ClipboardImage
@@ -1858,7 +1874,7 @@ pub struct Image {
     /// The raw image bytes
     pub bytes: Vec<u8>,
     /// The unique ID for the image
-    id: u64,
+    pub id: u64,
 }
 
 impl Hash for Image {
@@ -1976,8 +1992,10 @@ impl Image {
 /// A clipboard item that should be copied to the clipboard
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ClipboardString {
-    pub(crate) text: String,
-    pub(crate) metadata: Option<String>,
+    /// The text content.
+    pub text: String,
+    /// Optional metadata associated with this clipboard string.
+    pub metadata: Option<String>,
 }
 
 impl ClipboardString {
@@ -2017,7 +2035,8 @@ impl ClipboardString {
     }
 
     #[cfg_attr(any(target_os = "linux", target_os = "freebsd"), allow(dead_code))]
-    pub(crate) fn text_hash(text: &str) -> u64 {
+    /// Compute a hash of the given text for clipboard change detection.
+    pub fn text_hash(text: &str) -> u64 {
         let mut hasher = SeaHasher::new();
         text.hash(&mut hasher);
         hasher.finish()
