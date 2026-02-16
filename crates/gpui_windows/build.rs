@@ -1,7 +1,6 @@
 #![allow(clippy::disallowed_methods, reason = "build scripts are exempt")]
 
 use std::{
-    ffi::OsString,
     fs,
     io::Write,
     path::{Path, PathBuf},
