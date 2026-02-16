@@ -63,6 +63,7 @@ objc.workspace = true
 [dev-dependencies]
 collections = { workspace = true, features = ["test-support"] }
 gpui = { workspace = true, features = ["test-support"] }
+gpui_platform.workspace = true
 sha2.workspace = true
 simplelog.workspace = true
 
