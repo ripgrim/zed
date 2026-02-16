@@ -802,14 +802,15 @@ impl TextRun {
 pub struct GlyphId(pub(crate) u32);
 
 #[derive(Clone, Debug, PartialEq)]
-pub(crate) struct RenderGlyphParams {
-    pub(crate) font_id: FontId,
-    pub(crate) glyph_id: GlyphId,
-    pub(crate) font_size: Pixels,
-    pub(crate) subpixel_variant: Point<u8>,
-    pub(crate) scale_factor: f32,
-    pub(crate) is_emoji: bool,
-    pub(crate) subpixel_rendering: bool,
+#[expect(missing_docs)]
+pub struct RenderGlyphParams {
+    pub font_id: FontId,
+    pub glyph_id: GlyphId,
+    pub font_size: Pixels,
+    pub subpixel_variant: Point<u8>,
+    pub scale_factor: f32,
+    pub is_emoji: bool,
+    pub subpixel_rendering: bool,
 }
 
 impl Eq for RenderGlyphParams {}

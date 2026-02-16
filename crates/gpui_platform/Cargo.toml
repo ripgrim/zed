@@ -1,0 +1,19 @@
+[package]
+name = "gpui_platform"
+version = "0.1.0"
+edition.workspace = true
+publish.workspace = true
+license = "Apache-2.0"
+
+[lints]
+workspace = true
+
+[lib]
+path = "src/gpui_platform.rs"
+
+[features]
+default = ["gpui/default"]
+test-support = ["gpui/test-support"]
+
+[dependencies]
+gpui.workspace = true

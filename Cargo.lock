@@ -7487,6 +7487,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "gpui_platform"
+version = "0.1.0"
+dependencies = [
+ "gpui",
+]
+
+[[package]]
 name = "gpui_tokio"
 version = "0.1.0"
 dependencies = [

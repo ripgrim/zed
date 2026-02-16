@@ -93,12 +93,14 @@ pub fn background_executor() -> BackgroundExecutor {
 }
 
 #[cfg(target_os = "macos")]
-pub(crate) fn current_platform(headless: bool) -> Rc<dyn Platform> {
+/// Returns the default platform implementation for the current OS.
+pub fn current_platform(headless: bool) -> Rc<dyn Platform> {
     Rc::new(MacPlatform::new(headless))
 }
 
 #[cfg(any(target_os = "linux", target_os = "freebsd"))]
-pub(crate) fn current_platform(headless: bool) -> Rc<dyn Platform> {
+/// Returns the default platform implementation for the current OS.
+pub fn current_platform(headless: bool) -> Rc<dyn Platform> {
     #[cfg(feature = "x11")]
     use anyhow::Context as _;
 
@@ -123,7 +125,8 @@ pub(crate) fn current_platform(headless: bool) -> Rc<dyn Platform> {
 }
 
 #[cfg(target_os = "windows")]
-pub(crate) fn current_platform(headless: bool) -> Rc<dyn Platform> {
+/// Returns the default platform implementation for the current OS.
+pub fn current_platform(headless: bool) -> Rc<dyn Platform> {
     Rc::new(
         WindowsPlatform::new(headless)
             .inspect_err(|err| show_error("Failed to launch", err.to_string()))
@@ -162,7 +165,8 @@ pub fn guess_compositor() -> &'static str {
     }
 }
 
-pub(crate) trait Platform: 'static {
+#[expect(missing_docs)]
+pub trait Platform: 'static {
     fn background_executor(&self) -> BackgroundExecutor;
     fn foreground_executor(&self) -> ForegroundExecutor;
     fn text_system(&self) -> Arc<dyn PlatformTextSystem>;
@@ -482,13 +486,16 @@ impl Tiling {
 }
 
 #[derive(Debug, Copy, Clone, Eq, PartialEq, Default)]
-pub(crate) struct RequestFrameOptions {
-    pub(crate) require_presentation: bool,
-    /// Force refresh of all rendering states when true
-    pub(crate) force_render: bool,
+#[expect(missing_docs)]
+pub struct RequestFrameOptions {
+    /// Whether a presentation is required.
+    pub require_presentation: bool,
+    /// Force refresh of all rendering states when true.
+    pub force_render: bool,
 }
 
-pub(crate) trait PlatformWindow: HasWindowHandle + HasDisplayHandle {
+#[expect(missing_docs)]
+pub trait PlatformWindow: HasWindowHandle + HasDisplayHandle {
     fn bounds(&self) -> Bounds<Pixels>;
     fn is_maximized(&self) -> bool;
     fn window_bounds(&self) -> WindowBounds;
@@ -641,7 +648,8 @@ pub trait PlatformDispatcher: Send + Sync {
     }
 }
 
-pub(crate) trait PlatformTextSystem: Send + Sync {
+#[expect(missing_docs)]
+pub trait PlatformTextSystem: Send + Sync {
     fn add_fonts(&self, fonts: Vec<Cow<'static, [u8]>>) -> Result<()>;
     fn all_font_names(&self) -> Vec<String>;
     fn font_id(&self, descriptor: &Font) -> Result<FontId>;
@@ -660,8 +668,10 @@ pub(crate) trait PlatformTextSystem: Send + Sync {
     -> TextRenderingMode;
 }
 
-pub(crate) struct NoopTextSystem;
+#[expect(missing_docs)]
+pub struct NoopTextSystem;
 
+#[expect(missing_docs)]
 impl NoopTextSystem {
     #[allow(dead_code)]
     pub fn new() -> Self {
@@ -824,7 +834,8 @@ pub(crate) fn get_gamma_correction_ratios(gamma: f32) -> [f32; 4] {
 }
 
 #[derive(PartialEq, Eq, Hash, Clone)]
-pub(crate) enum AtlasKey {
+#[expect(missing_docs)]
+pub enum AtlasKey {
     Glyph(RenderGlyphParams),
     Svg(RenderSvgParams),
     Image(RenderImageParams),
@@ -873,7 +884,8 @@ impl From<RenderImageParams> for AtlasKey {
     }
 }
 
-pub(crate) trait PlatformAtlas: Send + Sync {
+#[expect(missing_docs)]
+pub trait PlatformAtlas: Send + Sync {
     fn get_or_insert_with<'a>(
         &self,
         key: &AtlasKey,
@@ -919,19 +931,27 @@ impl<T> AtlasTextureList<T> {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[repr(C)]
-pub(crate) struct AtlasTile {
-    pub(crate) texture_id: AtlasTextureId,
-    pub(crate) tile_id: TileId,
-    pub(crate) padding: u32,
-    pub(crate) bounds: Bounds<DevicePixels>,
+#[expect(missing_docs)]
+pub struct AtlasTile {
+    /// The texture this tile belongs to.
+    pub texture_id: AtlasTextureId,
+    /// The unique ID of this tile within its texture.
+    pub tile_id: TileId,
+    /// Padding around the tile content in pixels.
+    pub padding: u32,
+    /// The bounds of this tile within the texture.
+    pub bounds: Bounds<DevicePixels>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 #[repr(C)]
-pub(crate) struct AtlasTextureId {
+#[expect(missing_docs)]
+pub struct AtlasTextureId {
     // We use u32 instead of usize for Metal Shader Language compatibility
-    pub(crate) index: u32,
-    pub(crate) kind: AtlasTextureKind,
+    /// The index of this texture in the atlas.
+    pub index: u32,
+    /// The kind of content stored in this texture.
+    pub kind: AtlasTextureKind,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -943,7 +963,8 @@ pub(crate) struct AtlasTextureId {
     ),
     allow(dead_code)
 )]
-pub(crate) enum AtlasTextureKind {
+#[expect(missing_docs)]
+pub enum AtlasTextureKind {
     Monochrome = 0,
     Polychrome = 1,
     Subpixel = 2,
@@ -951,7 +972,8 @@ pub(crate) enum AtlasTextureKind {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 #[repr(C)]
-pub(crate) struct TileId(pub(crate) u32);
+#[expect(missing_docs)]
+pub struct TileId(pub u32);
 
 impl From<etagere::AllocId> for TileId {
     fn from(id: etagere::AllocId) -> Self {
@@ -965,11 +987,13 @@ impl From<TileId> for etagere::AllocId {
     }
 }
 
-pub(crate) struct PlatformInputHandler {
+#[expect(missing_docs)]
+pub struct PlatformInputHandler {
     cx: AsyncWindowContext,
     handler: Box<dyn InputHandler>,
 }
 
+#[expect(missing_docs)]
 #[cfg_attr(
     all(
         any(target_os = "linux", target_os = "freebsd"),
@@ -1268,7 +1292,8 @@ pub struct WindowOptions {
     ),
     allow(dead_code)
 )]
-pub(crate) struct WindowParams {
+#[expect(missing_docs)]
+pub struct WindowParams {
     pub bounds: Bounds<Pixels>,
 
     /// The titlebar configuration of the window

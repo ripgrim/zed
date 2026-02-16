@@ -145,6 +145,15 @@ impl Application {
         ))
     }
 
+    /// Builds an app with a caller-provided platform implementation.
+    pub fn with_platform(platform: Rc<dyn Platform>) -> Self {
+        Self(App::new_app(
+            platform,
+            Arc::new(()),
+            Arc::new(NullHttpClient),
+        ))
+    }
+
     /// Build an app in headless mode. This prevents opening windows,
     /// but makes it possible to run an application in an context like
     /// SSH, where GUI applications are not allowed.

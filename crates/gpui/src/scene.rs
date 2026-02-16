@@ -21,7 +21,8 @@ pub(crate) type PathVertex_ScaledPixels = PathVertex<ScaledPixels>;
 pub(crate) type DrawOrder = u32;
 
 #[derive(Default)]
-pub(crate) struct Scene {
+#[expect(missing_docs)]
+pub struct Scene {
     pub(crate) paint_operations: Vec<PaintOperation>,
     primitive_bounds: BoundsTree<ScaledPixels>,
     layer_stack: Vec<DrawOrder>,
@@ -35,6 +36,7 @@ pub(crate) struct Scene {
     pub(crate) surfaces: Vec<PaintSurface>,
 }
 
+#[expect(missing_docs)]
 impl Scene {
     pub fn clear(&mut self) {
         self.paint_operations.clear();
@@ -200,7 +202,8 @@ pub(crate) enum PaintOperation {
 }
 
 #[derive(Clone)]
-pub(crate) enum Primitive {
+#[expect(missing_docs)]
+pub enum Primitive {
     Shadow(Shadow),
     Quad(Quad),
     Path(Path<ScaledPixels>),
@@ -211,6 +214,7 @@ pub(crate) enum Primitive {
     Surface(PaintSurface),
 }
 
+#[expect(missing_docs)]
 impl Primitive {
     pub fn bounds(&self) -> &Bounds<ScaledPixels> {
         match self {
@@ -476,7 +480,8 @@ pub(crate) enum PrimitiveBatch {
 
 #[derive(Default, Debug, Clone)]
 #[repr(C)]
-pub(crate) struct Quad {
+#[expect(missing_docs)]
+pub struct Quad {
     pub order: DrawOrder,
     pub border_style: BorderStyle,
     pub bounds: Bounds<ScaledPixels>,
@@ -495,7 +500,8 @@ impl From<Quad> for Primitive {
 
 #[derive(Debug, Clone)]
 #[repr(C)]
-pub(crate) struct Underline {
+#[expect(missing_docs)]
+pub struct Underline {
     pub order: DrawOrder,
     pub pad: u32, // align to 8 bytes
     pub bounds: Bounds<ScaledPixels>,
@@ -513,7 +519,8 @@ impl From<Underline> for Primitive {
 
 #[derive(Debug, Clone)]
 #[repr(C)]
-pub(crate) struct Shadow {
+#[expect(missing_docs)]
+pub struct Shadow {
     pub order: DrawOrder,
     pub blur_radius: ScaledPixels,
     pub bounds: Bounds<ScaledPixels>,
@@ -644,7 +651,8 @@ impl Default for TransformationMatrix {
 
 #[derive(Clone, Debug)]
 #[repr(C)]
-pub(crate) struct MonochromeSprite {
+#[expect(missing_docs)]
+pub struct MonochromeSprite {
     pub order: DrawOrder,
     pub pad: u32, // align to 8 bytes
     pub bounds: Bounds<ScaledPixels>,
@@ -662,7 +670,8 @@ impl From<MonochromeSprite> for Primitive {
 
 #[derive(Clone, Debug)]
 #[repr(C)]
-pub(crate) struct SubpixelSprite {
+#[expect(missing_docs)]
+pub struct SubpixelSprite {
     pub order: DrawOrder,
     pub pad: u32, // align to 8 bytes
     pub bounds: Bounds<ScaledPixels>,
@@ -680,7 +689,8 @@ impl From<SubpixelSprite> for Primitive {
 
 #[derive(Clone, Debug)]
 #[repr(C)]
-pub(crate) struct PolychromeSprite {
+#[expect(missing_docs)]
+pub struct PolychromeSprite {
     pub order: DrawOrder,
     pub pad: u32, // align to 8 bytes
     pub grayscale: bool,
@@ -698,7 +708,8 @@ impl From<PolychromeSprite> for Primitive {
 }
 
 #[derive(Clone, Debug)]
-pub(crate) struct PaintSurface {
+#[expect(missing_docs)]
+pub struct PaintSurface {
     pub order: DrawOrder,
     pub bounds: Bounds<ScaledPixels>,
     pub content_mask: ContentMask<ScaledPixels>,
