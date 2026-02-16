@@ -447,7 +447,7 @@ pub fn execute_run(
 ) -> Result<()> {
     init_paths()?;
 
-    let app = gpui::Application::headless();
+    let app = gpui_platform::headless();
     let pid = std::process::id();
     let id = pid.to_string();
     app.background_executor()

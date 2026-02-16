@@ -13810,6 +13810,7 @@ dependencies = [
  "git2",
  "git_hosting_providers",
  "gpui",
+ "gpui_platform",
  "gpui_tokio",
  "http_client",
  "image",
