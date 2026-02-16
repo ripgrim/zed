@@ -3599,7 +3599,7 @@ mod tests {
                     tool_use_id.clone(),
                     tool_name.clone(),
                     raw_input.clone(),
-                    json_parse_error.clone(),
+                    json_parse_error,
                     &event_stream,
                 );
 
