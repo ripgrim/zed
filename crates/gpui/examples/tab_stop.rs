@@ -178,7 +178,7 @@ impl Render for Example {
 }
 
 fn main() {
-    Application::new().run(|cx: &mut App| {
+    Application::with_platform(gpui_platform::current_platform(false)).run(|cx: &mut App| {
         cx.bind_keys([
             KeyBinding::new("tab", Tab, None),
             KeyBinding::new("shift-tab", TabPrev, None),
