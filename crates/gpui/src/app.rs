@@ -46,7 +46,7 @@ use crate::{
     Subscription, SvgRenderer, Task, TextRenderingMode, TextSystem, ThermalState, Window,
     WindowAppearance, WindowHandle, WindowId, WindowInvalidator,
     colors::{Colors, GlobalColors},
-    current_platform, hash, init_app_menus,
+    hash, init_app_menus,
 };
 
 mod async_context;
@@ -136,14 +136,14 @@ impl Application {
     ///
     /// On Windows, use [`Application::with_platform`] instead — the Windows
     /// platform lives in the `gpui_windows` crate.
-    #[cfg(not(target_os = "windows"))]
+    #[cfg(not(any(target_os = "windows", target_os = "macos")))]
     #[allow(clippy::new_without_default)]
     pub fn new() -> Self {
         #[cfg(any(test, feature = "test-support"))]
         log::info!("GPUI was compiled in test mode");
 
         Self(App::new_app(
-            current_platform(false),
+            crate::current_platform(false),
             Arc::new(()),
             Arc::new(NullHttpClient),
         ))
@@ -163,10 +163,10 @@ impl Application {
     /// SSH, where GUI applications are not allowed.
     ///
     /// On Windows, use [`Application::with_platform`] instead.
-    #[cfg(not(target_os = "windows"))]
+    #[cfg(not(any(target_os = "windows", target_os = "macos")))]
     pub fn headless() -> Self {
         Self(App::new_app(
-            current_platform(true),
+            crate::current_platform(true),
             Arc::new(()),
             Arc::new(NullHttpClient),
         ))

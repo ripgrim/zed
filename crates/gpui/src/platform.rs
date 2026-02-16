@@ -87,12 +87,6 @@ pub use test::{TestDispatcher, TestScreenCaptureSource, TestScreenCaptureStream}
 #[cfg(all(target_os = "macos", any(test, feature = "test-support")))]
 pub use visual_test::VisualTestPlatform;
 
-#[cfg(target_os = "macos")]
-/// Returns the default platform implementation for the current OS.
-pub fn current_platform(_: bool) -> Rc<dyn Platform> {
-    todo!()
-}
-
 #[cfg(any(target_os = "linux", target_os = "freebsd"))]
 /// Returns the default platform implementation for the current OS.
 pub fn current_platform(headless: bool) -> Rc<dyn Platform> {
