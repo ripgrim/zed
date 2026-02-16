@@ -5,10 +5,7 @@
 #[cfg(feature = "preview")]
 pub fn run_component_preview() {
     use fs::RealFs;
-    use gpui::{
-        AppContext as _, Application, Bounds, KeyBinding, WindowBounds, WindowOptions, actions,
-        size,
-    };
+    use gpui::{AppContext as _, Bounds, KeyBinding, WindowBounds, WindowOptions, actions, size};
 
     use client::{Client, UserStore};
     use language::LanguageRegistry;
@@ -28,7 +25,7 @@ pub fn run_component_preview() {
         cx.quit();
     }
 
-    Application::new().run(|cx| {
+    gpui_platform::application().run(|cx| {
         component::init();
 
         cx.on_action(quit);

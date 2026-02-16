@@ -39,6 +39,9 @@ ui_input.workspace = true
 uuid.workspace = true
 workspace.workspace = true
 
+[dev-dependencies]
+gpui_platform.workspace = true
+
 [[example]]
 name = "component_preview"
 path = "examples/component_preview.rs"
