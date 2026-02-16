@@ -15,6 +15,7 @@ use windows::{
 };
 
 use crate::*;
+use gpui::*;
 
 pub(crate) trait HiLoWord {
     fn hiword(&self) -> u16;

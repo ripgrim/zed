@@ -18,7 +18,7 @@ use windows::Win32::{
 };
 use windows_core::PCWSTR;
 
-use crate::{
+use gpui::{
     ClipboardEntry, ClipboardItem, ClipboardString, ExternalPaths, Image, ImageFormat, hash,
 };
 

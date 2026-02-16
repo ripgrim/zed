@@ -32,6 +32,8 @@ pub(crate) use vsync::*;
 pub(crate) use window::*;
 pub(crate) use wrapper::*;
 
+pub use platform::WindowsPlatform;
+
 pub(crate) use windows::Win32::Foundation::HWND;
 
 #[cfg(feature = "screen-capture")]

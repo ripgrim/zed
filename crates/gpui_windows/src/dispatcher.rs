@@ -21,10 +21,10 @@ use windows::{
     },
 };
 
-use crate::{
-    GLOBAL_THREAD_TIMINGS, HWND, PlatformDispatcher, Priority, PriorityQueueSender,
-    RunnableVariant, SafeHwnd, THREAD_TIMINGS, TaskTiming, ThreadTaskTimings, TimerResolutionGuard,
-    WM_GPUI_TASK_DISPATCHED_ON_MAIN_THREAD, profiler,
+use crate::{HWND, SafeHwnd, WM_GPUI_TASK_DISPATCHED_ON_MAIN_THREAD};
+use gpui::{
+    GLOBAL_THREAD_TIMINGS, PlatformDispatcher, Priority, PriorityQueueSender, RunnableVariant,
+    THREAD_TIMINGS, TaskTiming, ThreadTaskTimings, TimerResolutionGuard, profiler,
 };
 
 pub(crate) struct WindowsDispatcher {

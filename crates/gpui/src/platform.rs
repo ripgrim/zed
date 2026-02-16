@@ -20,14 +20,16 @@ mod test;
 #[cfg(all(target_os = "macos", any(test, feature = "test-support")))]
 mod visual_test;
 
-#[cfg(target_os = "windows")]
-mod windows;
-
 #[cfg(all(
     feature = "screen-capture",
     any(target_os = "windows", target_os = "linux", target_os = "freebsd",)
 ))]
 pub(crate) mod scap_screen_capture;
+
+#[cfg(all(target_os = "windows", feature = "screen-capture"))]
+pub(crate) type PlatformScreenCaptureFrame = scap::frame::Frame;
+#[cfg(all(target_os = "windows", not(feature = "screen-capture")))]
+pub(crate) type PlatformScreenCaptureFrame = ();
 
 use crate::{
     Action, AnyWindowHandle, App, AsyncWindowContext, BackgroundExecutor, Bounds,
@@ -75,8 +77,6 @@ pub(crate) use linux::*;
 pub(crate) use mac::*;
 #[cfg(any(test, feature = "test-support"))]
 pub(crate) use test::*;
-#[cfg(target_os = "windows")]
-pub(crate) use windows::*;
 
 #[cfg(all(target_os = "linux", feature = "wayland"))]
 pub use linux::layer_shell;
@@ -122,16 +122,6 @@ pub fn current_platform(headless: bool) -> Rc<dyn Platform> {
         "Headless" => Rc::new(HeadlessClient::new()),
         _ => unreachable!(),
     }
-}
-
-#[cfg(target_os = "windows")]
-/// Returns the default platform implementation for the current OS.
-pub fn current_platform(headless: bool) -> Rc<dyn Platform> {
-    Rc::new(
-        WindowsPlatform::new(headless)
-            .inspect_err(|err| show_error("Failed to launch", err.to_string()))
-            .unwrap(),
-    )
 }
 
 /// Return which compositor we're guessing we'll use.
@@ -565,7 +555,7 @@ pub trait PlatformWindow: HasWindowHandle + HasDisplayHandle {
     fn set_tabbing_identifier(&self, _identifier: Option<String>) {}
 
     #[cfg(target_os = "windows")]
-    fn get_raw_handle(&self) -> windows::HWND;
+    fn get_raw_handle(&self) -> windows::Win32::Foundation::HWND;
 
     // Linux specific methods
     fn inner_window_bounds(&self) -> WindowBounds {
@@ -894,9 +884,10 @@ pub trait PlatformAtlas: Send + Sync {
     fn remove(&self, key: &AtlasKey);
 }
 
-struct AtlasTextureList<T> {
-    textures: Vec<Option<T>>,
-    free_list: Vec<usize>,
+#[doc(hidden)]
+pub struct AtlasTextureList<T> {
+    pub textures: Vec<Option<T>>,
+    pub free_list: Vec<usize>,
 }
 
 impl<T> Default for AtlasTextureList<T> {
@@ -918,13 +909,13 @@ impl<T> ops::Index<usize> for AtlasTextureList<T> {
 
 impl<T> AtlasTextureList<T> {
     #[allow(unused)]
-    fn drain(&mut self) -> std::vec::Drain<'_, Option<T>> {
+    pub fn drain(&mut self) -> std::vec::Drain<'_, Option<T>> {
         self.free_list.clear();
         self.textures.drain(..)
     }
 
     #[allow(dead_code)]
-    fn iter_mut(&mut self) -> impl DoubleEndedIterator<Item = &mut T> {
+    pub fn iter_mut(&mut self) -> impl DoubleEndedIterator<Item = &mut T> {
         self.textures.iter_mut().flatten()
     }
 }

@@ -17,7 +17,7 @@ categories = ["gui"]
 workspace = true
 
 [features]
-default = ["font-kit", "wayland", "x11", "windows-manifest"]
+default = ["font-kit", "wayland", "x11"]
 test-support = [
     "leak-detection",
     "collections/test-support",
@@ -65,7 +65,6 @@ x11 = [
 screen-capture = [
     "scap",
 ]
-windows-manifest = []
 
 [lib]
 path = "src/gpui.rs"
@@ -214,11 +213,8 @@ xim = { git = "https://github.com/zed-industries/xim-rs.git", rev = "16f35a2c881
 x11-clipboard = { version = "0.9.3", optional = true }
 
 [target.'cfg(target_os = "windows")'.dependencies]
-rand.workspace = true
-windows.workspace = true
-windows-core.workspace = true
-windows-numerics = "0.2"
-windows-registry = "0.5"
+windows = { version = "0.61", features = ["Win32_Foundation"] }
+
 
 [dev-dependencies]
 backtrace.workspace = true
@@ -233,9 +229,7 @@ scheduler = { workspace = true, features = ["test-support"] }
 unicode-segmentation.workspace = true
 util = { workspace = true, features = ["test-support"] }
 
-[target.'cfg(target_os = "windows")'.build-dependencies]
-embed-resource = "3.0"
-windows-registry = "0.5"
+
 
 [target.'cfg(target_os = "macos")'.build-dependencies]
 bindgen = "0.71"

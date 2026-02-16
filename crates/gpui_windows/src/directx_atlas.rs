@@ -9,9 +9,10 @@ use windows::Win32::Graphics::{
     Dxgi::Common::*,
 };
 
-use crate::{
-    AtlasKey, AtlasTextureId, AtlasTextureKind, AtlasTile, Bounds, DevicePixels, PlatformAtlas,
-    Point, Size, platform::AtlasTextureList,
+use crate::DirectXDevices;
+use gpui::{
+    AtlasKey, AtlasTextureId, AtlasTextureKind, AtlasTextureList, AtlasTile, Bounds, DevicePixels,
+    PlatformAtlas, Point, Size,
 };
 
 pub(crate) struct DirectXAtlas(Mutex<DirectXAtlasState>);

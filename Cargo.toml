@@ -85,6 +85,7 @@ members = [
     "crates/gpui",
     "crates/gpui_macros",
     "crates/gpui_platform",
+    "crates/gpui_windows",
     "crates/gpui_tokio",
     "crates/html_to_markdown",
     "crates/http_client",
@@ -324,6 +325,7 @@ google_ai = { path = "crates/google_ai" }
 gpui = { path = "crates/gpui", default-features = false }
 gpui_macros = { path = "crates/gpui_macros" }
 gpui_platform = { path = "crates/gpui_platform", default-features = false }
+gpui_windows = { path = "crates/gpui_windows", default-features = false }
 gpui_tokio = { path = "crates/gpui_tokio" }
 html_to_markdown = { path = "crates/html_to_markdown" }
 http_client = { path = "crates/http_client" }

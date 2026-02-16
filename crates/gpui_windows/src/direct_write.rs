@@ -24,6 +24,7 @@ use windows::{
 use windows_numerics::Vector2;
 
 use crate::*;
+use gpui::*;
 
 #[derive(Debug)]
 struct FontInfo {
@@ -1885,7 +1886,7 @@ const DEFAULT_LOCALE_NAME: PCWSTR = windows::core::w!("en-US");
 
 #[cfg(test)]
 mod tests {
-    use crate::platform::windows::direct_write::ClusterAnalyzer;
+    use crate::direct_write::ClusterAnalyzer;
 
     #[test]
     fn test_cluster_map() {

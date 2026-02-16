@@ -19,12 +19,9 @@ use windows::{
     core::Interface,
 };
 
-use crate::{
-    platform::windows::directx_renderer::shader_resources::{
-        RawShaderBytes, ShaderModule, ShaderTarget,
-    },
-    *,
-};
+use crate::directx_renderer::shader_resources::{RawShaderBytes, ShaderModule, ShaderTarget};
+use crate::*;
+use gpui::*;
 
 pub(crate) const DISABLE_DIRECT_COMPOSITION: &str = "GPUI_DISABLE_DIRECT_COMPOSITION";
 const RENDER_TARGET_FORMAT: DXGI_FORMAT = DXGI_FORMAT_B8G8R8A8_UNORM;

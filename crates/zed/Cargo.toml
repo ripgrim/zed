@@ -120,7 +120,6 @@ gpui = { workspace = true, features = [
     "wayland",
     "x11",
     "font-kit",
-    "windows-manifest",
 ] }
 image = { workspace = true, optional = true }
 semver = { workspace = true, optional = true }

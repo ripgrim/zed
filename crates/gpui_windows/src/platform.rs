@@ -28,8 +28,9 @@ use windows::{
 };
 
 use crate::*;
+use gpui::*;
 
-pub(crate) struct WindowsPlatform {
+pub struct WindowsPlatform {
     inner: Rc<WindowsPlatformInner>,
     raw_window_handles: Arc<RwLock<SmallVec<[SafeHwnd; 4]>>>,
     // The below members will never change throughout the entire lifecycle of the app.
@@ -93,7 +94,7 @@ impl WindowsPlatformState {
 }
 
 impl WindowsPlatform {
-    pub(crate) fn new(headless: bool) -> Result<Self> {
+    pub fn new(headless: bool) -> Result<Self> {
         unsafe {
             OleInitialize(None).context("unable to initialize Windows OLE")?;
         }
@@ -1340,7 +1341,8 @@ unsafe extern "system" fn window_procedure(
 
 #[cfg(test)]
 mod tests {
-    use crate::{ClipboardItem, read_from_clipboard, write_to_clipboard};
+    use crate::{read_from_clipboard, write_to_clipboard};
+    use gpui::ClipboardItem;
 
     #[test]
     fn test_clipboard() {

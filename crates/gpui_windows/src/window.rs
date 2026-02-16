@@ -27,6 +27,7 @@ use windows::{
 };
 
 use crate::*;
+use gpui::*;
 
 pub(crate) struct WindowsWindow(pub Rc<WindowsWindowInner>);
 
@@ -1476,7 +1477,8 @@ fn set_non_rude_hwnd(hwnd: HWND, non_rude: bool) {
 #[cfg(test)]
 mod tests {
     use super::ClickState;
-    use crate::{DevicePixels, MouseButton, point};
+    use crate::*;
+    use gpui::{DevicePixels, MouseButton, point};
     use std::time::Duration;
 
     #[test]
