@@ -663,7 +663,6 @@ mod tests {
                 rejected_output: None,
                 prefill: None,
                 provider: crate::PredictionProvider::Teacher(crate::TeacherBackend::Sonnet45),
-                prefill: None,
             }),
             predictions: Vec::new(),
             score: Vec::new(),
