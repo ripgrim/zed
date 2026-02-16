@@ -5268,6 +5268,7 @@ dependencies = [
  "fs",
  "futures 0.3.31",
  "gpui",
+ "gpui_platform",
  "gpui_tokio",
  "http_client",
  "indoc",
