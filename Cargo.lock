@@ -21283,6 +21283,7 @@ dependencies = [
  "git_ui",
  "go_to_line",
  "gpui",
+ "gpui_platform",
  "gpui_tokio",
  "http_client",
  "image",

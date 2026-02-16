@@ -12,8 +12,9 @@ workspace = true
 path = "src/gpui_platform.rs"
 
 [features]
-default = ["gpui/default"]
+default = []
 test-support = ["gpui/test-support"]
+screen-capture = ["gpui/screen-capture", "gpui_macos/screen-capture", "gpui_windows/screen-capture"]
 
 [dependencies]
 gpui.workspace = true
