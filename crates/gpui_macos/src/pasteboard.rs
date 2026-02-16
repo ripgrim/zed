@@ -75,7 +75,7 @@ impl Pasteboard {
     }
 
     fn read_image(&self, format: ImageFormat) -> Option<ClipboardItem> {
-        let mut ut_type: UTType = format.into();
+        let ut_type: UTType = format.into();
 
         unsafe {
             let types: id = self.inner.types();

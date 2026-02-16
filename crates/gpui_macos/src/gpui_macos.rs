@@ -31,9 +31,8 @@ mod window_appearance;
 
 use cocoa::{
     base::{id, nil},
-    foundation::{NSAutoreleasePool, NSNotFound, NSRect, NSSize, NSString, NSUInteger},
+    foundation::{NSAutoreleasePool, NSNotFound, NSString, NSUInteger},
 };
-use gpui::{DevicePixels, Pixels, Size, px, size};
 
 use objc::runtime::{BOOL, NO, YES};
 use std::{
@@ -137,21 +136,4 @@ unsafe impl objc::Encode for NSRange {
 #[allow(clippy::disallowed_methods)]
 unsafe fn ns_string(string: &str) -> id {
     unsafe { NSString::alloc(nil).init_str(string).autorelease() }
-}
-
-pub(crate) fn size_from_ns_size(value: NSSize) -> Size<Pixels> {
-    Size {
-        width: px(value.width as f32),
-        height: px(value.height as f32),
-    }
-}
-
-pub(crate) fn size_of_pixels_from_ns_rect(rect: NSRect) -> Size<Pixels> {
-    let NSSize { width, height } = rect.size;
-    size(width.into(), height.into())
-}
-
-pub(crate) fn size_of_device_pixels_from_ns_rect(rect: NSRect) -> Size<DevicePixels> {
-    let NSSize { width, height } = rect.size;
-    size(DevicePixels(width as i32), DevicePixels(height as i32))
 }

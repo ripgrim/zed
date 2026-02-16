@@ -1624,7 +1624,7 @@ impl PlatformWindow for MacWindow {
 
         unsafe {
             let app = NSApplication::sharedApplication(nil);
-            let mut event: id = msg_send![app, currentEvent];
+            let event: id = msg_send![app, currentEvent];
             let _: () = msg_send![window, performWindowDragWithEvent: event];
         }
     }
@@ -1771,7 +1771,7 @@ extern "C" fn handle_key_event(this: &Object, native_event: id, key_equivalent: 
     };
 
     match event {
-        PlatformInput::KeyDown(mut key_down_event) => {
+        PlatformInput::KeyDown(key_down_event) => {
             // For certain keystrokes, macOS will first dispatch a "key equivalent" event.
             // If that event isn't handled, it will then dispatch a "key down" event. GPUI
             // makes no distinction between these two types of events, so we need to ignore
@@ -2034,7 +2034,7 @@ extern "C" fn window_will_enter_fullscreen(this: &Object, _: Sel, _: id) {
 
 extern "C" fn window_will_exit_fullscreen(this: &Object, _: Sel, _: id) {
     let window_state = unsafe { get_window_state(this) };
-    let mut lock = window_state.as_ref().lock();
+    let lock = window_state.as_ref().lock();
 
     let min_version = NSOperatingSystemVersion::new(15, 3, 0);
 
@@ -2093,7 +2093,7 @@ extern "C" fn window_did_change_screen(this: &Object, _: Sel, _: id) {
 
 extern "C" fn window_did_change_key_status(this: &Object, selector: Sel, _: id) {
     let window_state = unsafe { get_window_state(this) };
-    let mut lock = window_state.lock();
+    let lock = window_state.lock();
     let is_active = unsafe { lock.native_window.isKeyWindow() == YES };
 
     // When opening a pop-up while the application isn't active, Cocoa sends a spurious
@@ -2418,7 +2418,7 @@ extern "C" fn do_command_by_selector(this: &Object, _: Sel, _: Sel) {
     let mut event_callback = lock.event_callback.take();
     drop(lock);
 
-    if let Some((keystroke, mut callback)) = keystroke.zip(event_callback.as_mut()) {
+    if let Some((keystroke, callback)) = keystroke.zip(event_callback.as_mut()) {
         let handled = (callback)(PlatformInput::KeyDown(KeyDownEvent {
             keystroke,
             is_held: false,
@@ -2553,7 +2553,7 @@ fn send_file_drop_event(
 ) -> bool {
     let mut window_state = window_state.lock();
     let window_event_callback = window_state.event_callback.as_mut();
-    if let Some(mut callback) = window_event_callback {
+    if let Some(callback) = window_event_callback {
         let external_files_dragged = match file_drop_event {
             FileDropEvent::Entered { .. } => Some(true),
             FileDropEvent::Exited => Some(false),

@@ -184,7 +184,7 @@ impl MacPlatform {
         let dispatcher = Arc::new(MacDispatcher::new());
 
         #[cfg(feature = "font-kit")]
-        let text_system = Arc::new(MacTextSystem::new());
+        let text_system = Arc::new(crate::MacTextSystem::new());
 
         #[cfg(not(feature = "font-kit"))]
         let text_system = Arc::new(gpui::NoopTextSystem::new());
@@ -1367,7 +1367,7 @@ extern "C" fn menu_will_open(this: &mut Object, _: Sel, _: id) {
 extern "C" fn handle_dock_menu(this: &mut Object, _: Sel, _: id) -> id {
     unsafe {
         let platform = get_mac_platform(this);
-        let mut state = platform.0.lock();
+        let state = platform.0.lock();
         if let Some(id) = state.dock_menu {
             id
         } else {

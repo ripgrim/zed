@@ -318,7 +318,7 @@ unsafe fn parse_keystroke(native_event: id) -> Keystroke {
     unsafe {
         use cocoa::appkit::*;
 
-        let mut characters = native_event
+        let characters = native_event
             .charactersIgnoringModifiers()
             .to_str()
             .to_string();

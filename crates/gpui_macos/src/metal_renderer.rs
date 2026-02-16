@@ -40,10 +40,10 @@ const SHADERS_SOURCE_FILE: &str = include_str!(concat!(env!("OUT_DIR"), "/stitch
 // https://developer.apple.com/documentation/metal/mtldevice/1433355-supportstexturesamplecount
 const PATH_SAMPLE_COUNT: u32 = 4;
 
-pub type Context = Arc<Mutex<InstanceBufferPool>>;
-pub type Renderer = MetalRenderer;
+pub(crate) type Context = Arc<Mutex<InstanceBufferPool>>;
+pub(crate) type Renderer = MetalRenderer;
 
-pub unsafe fn new_renderer(
+pub(crate) unsafe fn new_renderer(
     context: self::Context,
     _native_window: *mut c_void,
     _native_view: *mut c_void,
@@ -349,7 +349,7 @@ impl MetalRenderer {
         self.path_intermediate_texture = Some(self.device.new_texture(&texture_descriptor));
 
         if self.path_sample_count > 1 {
-            let mut msaa_descriptor = texture_descriptor;
+            let msaa_descriptor = texture_descriptor;
             msaa_descriptor.set_texture_type(metal::MTLTextureType::D2Multisample);
             msaa_descriptor.set_storage_mode(metal::MTLStorageMode::Private);
             msaa_descriptor.set_sample_count(self.path_sample_count as _);

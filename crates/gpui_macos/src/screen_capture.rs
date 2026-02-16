@@ -115,7 +115,7 @@ impl ScreenCaptureSource for MacScreenCaptureSource {
             let _: () = msg_send![configuration, release];
             let _: () = msg_send![delegate, release];
 
-            let (mut tx, rx) = oneshot::channel();
+            let (tx, rx) = oneshot::channel();
 
             let mut error: id = nil;
             let _: () = msg_send![stream, addStreamOutput:output type:SCStreamOutputTypeScreen sampleHandlerQueue:0 error:&mut error as *mut id];
@@ -242,11 +242,11 @@ unsafe fn screen_id_to_human_label() -> HashMap<CGDirectDisplayID, ScreenMeta> {
 
 pub(crate) fn get_sources() -> oneshot::Receiver<Result<Vec<Rc<dyn ScreenCaptureSource>>>> {
     unsafe {
-        let (mut tx, rx) = oneshot::channel();
+        let (tx, rx) = oneshot::channel();
         let tx = Rc::new(RefCell::new(Some(tx)));
         let screen_id_to_label = screen_id_to_human_label();
         let block = ConcreteBlock::new(move |shareable_content: id, error: id| {
-            let Some(mut tx) = tx.borrow_mut().take() else {
+            let Some(tx) = tx.borrow_mut().take() else {
                 return;
             };
 
