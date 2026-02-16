@@ -826,6 +826,8 @@ codegen-units = 16
 # (without this cargo will compile ~400 crates twice)
 [profile.dev.build-override]
 codegen-units = 16
+split-debuginfo = "unpacked"
+debug = true
 
 [profile.dev.package]
 # proc-macros start
