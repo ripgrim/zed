@@ -867,18 +867,30 @@ impl SettingsStore {
     /// Sets language-specific semantic token rules.
     ///
     /// These rules are registered by language modules (e.g. the Rust language module)
-    /// and are stored separately from the global rules. They are only applied to
-    /// buffers of the matching language by the `SemanticTokenStylizer`.
+    /// or by third-party extensions (via `semantic_token_rules.json` in their language
+    /// directories). They are stored separately from the global rules and are only
+    /// applied to buffers of the matching language by the `SemanticTokenStylizer`.
     ///
-    /// These should be registered before any `SemanticTokenStylizer` instances are
-    /// created (typically during `languages::init`), as existing cached stylizers
-    /// are not automatically invalidated.
+    /// This triggers a settings recomputation so that observers (e.g. `LspStore`)
+    /// are notified and can invalidate cached stylizers.
     pub fn set_language_semantic_token_rules(
         &mut self,
         language: SharedString,
         rules: SemanticTokenRules,
+        cx: &mut App,
     ) {
         self.language_semantic_token_rules.insert(language, rules);
+        self.recompute_values(None, cx);
+    }
+
+    /// Removes language-specific semantic token rules for the given language.
+    ///
+    /// This should be called when an extension that registered rules for a language
+    /// is unloaded. Triggers a settings recomputation so that observers (e.g.
+    /// `LspStore`) are notified and can invalidate cached stylizers.
+    pub fn remove_language_semantic_token_rules(&mut self, language: &str, cx: &mut App) {
+        self.language_semantic_token_rules.remove(language);
+        self.recompute_values(None, cx);
     }
 
     /// Returns the language-specific semantic token rules for the given language,
