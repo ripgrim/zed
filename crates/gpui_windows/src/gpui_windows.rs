@@ -1,3 +1,5 @@
+#![cfg(target_os = "windows")]
+
 mod clipboard;
 mod destination_list;
 mod direct_write;

@@ -18,11 +18,13 @@ screen-capture = ["gpui/screen-capture", "scap"]
 windows-manifest = []
 
 [dependencies]
+gpui.workspace = true
+
+[target.'cfg(target_os = "windows")'.dependencies]
 anyhow.workspace = true
 collections.workspace = true
 etagere = "0.2"
 futures.workspace = true
-gpui.workspace = true
 itertools.workspace = true
 parking_lot.workspace = true
 rand.workspace = true
@@ -34,10 +36,10 @@ windows.workspace = true
 windows-core.workspace = true
 windows-numerics = "0.2"
 
-[dependencies.scap]
+[target.'cfg(target_os = "windows")'.dependencies.scap]
 workspace = true
 optional = true
 
-[build-dependencies]
+[target.'cfg(target_os = "windows")'.build-dependencies]
 embed-resource = "3.0"
 windows-registry = "0.5"
