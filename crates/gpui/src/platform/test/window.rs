@@ -51,7 +51,7 @@ impl HasDisplayHandle for TestWindow {
 }
 
 impl TestWindow {
-    pub fn new(
+    pub(crate) fn new(
         handle: AnyWindowHandle,
         params: WindowParams,
         platform: Weak<TestPlatform>,
