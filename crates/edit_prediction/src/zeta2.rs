@@ -18,8 +18,9 @@ use std::env;
 use std::ops::Range;
 use std::{path::Path, sync::Arc, time::Instant};
 use zeta_prompt::{
-    CURSOR_MARKER, SELECTION_START_MARKER, EditPredictionModelKind, ZetaFormat, clean_zeta2_model_output,
-    format_zeta_prompt, get_prefill, prompt_input_contains_special_tokens,
+    CURSOR_MARKER, EditPredictionModelKind, SELECTION_START_MARKER, ZetaFormat,
+    clean_zeta2_model_output, format_zeta_prompt, get_prefill,
+    prompt_input_contains_special_tokens,
 };
 
 pub const MAX_CONTEXT_TOKENS: usize = 350;
