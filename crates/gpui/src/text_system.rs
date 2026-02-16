@@ -800,7 +800,7 @@ impl TextRun {
 /// An identifier for a specific glyph, as returned by [`WindowTextSystem::layout_line`].
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]
 #[repr(C)]
-pub struct GlyphId(pub(crate) u32);
+pub struct GlyphId(pub u32);
 
 #[derive(Clone, Debug, PartialEq)]
 #[expect(missing_docs)]
@@ -886,32 +886,32 @@ impl Font {
 pub struct FontMetrics {
     /// The number of font units that make up the "em square",
     /// a scalable grid for determining the size of a typeface.
-    pub(crate) units_per_em: u32,
+    pub units_per_em: u32,
 
     /// The vertical distance from the baseline of the font to the top of the glyph covers.
-    pub(crate) ascent: f32,
+    pub ascent: f32,
 
     /// The vertical distance from the baseline of the font to the bottom of the glyph covers.
-    pub(crate) descent: f32,
+    pub descent: f32,
 
     /// The recommended additional space to add between lines of type.
-    pub(crate) line_gap: f32,
+    pub line_gap: f32,
 
     /// The suggested position of the underline.
-    pub(crate) underline_position: f32,
+    pub underline_position: f32,
 
     /// The suggested thickness of the underline.
-    pub(crate) underline_thickness: f32,
+    pub underline_thickness: f32,
 
     /// The height of a capital letter measured from the baseline of the font.
-    pub(crate) cap_height: f32,
+    pub cap_height: f32,
 
     /// The height of a lowercase x.
-    pub(crate) x_height: f32,
+    pub x_height: f32,
 
     /// The outer limits of the area that the font covers.
     /// Corresponds to the xMin / xMax / yMin / yMax values in the OpenType `head` table
-    pub(crate) bounding_box: Bounds<f32>,
+    pub bounding_box: Bounds<f32>,
 }
 
 impl FontMetrics {

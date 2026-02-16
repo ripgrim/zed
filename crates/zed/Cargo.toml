@@ -119,9 +119,8 @@ system_specs.workspace = true
 gpui = { workspace = true, features = [
     "wayland",
     "x11",
-    "font-kit",
 ] }
-gpui_platform = {workspace = true, features=["screen-capture"]}
+gpui_platform = {workspace = true, features=["screen-capture", "font-kit"]}
 image = { workspace = true, optional = true }
 semver = { workspace = true, optional = true }
 tempfile = { workspace = true, optional = true }
