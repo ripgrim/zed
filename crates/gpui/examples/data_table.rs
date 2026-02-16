@@ -1,9 +1,9 @@
 use std::{ops::Range, rc::Rc, time::Duration};
 
 use gpui::{
-    App, Application, Bounds, Context, MouseDownEvent, MouseMoveEvent, MouseUpEvent, Pixels, Point,
-    Render, SharedString, UniformListScrollHandle, Window, WindowBounds, WindowOptions, canvas,
-    div, point, prelude::*, px, rgb, size, uniform_list,
+    App, Bounds, Context, MouseDownEvent, MouseMoveEvent, MouseUpEvent, Pixels, Point, Render,
+    SharedString, UniformListScrollHandle, Window, WindowBounds, WindowOptions, canvas, div, point,
+    prelude::*, px, rgb, size, uniform_list,
 };
 use gpui_platform::application;
 

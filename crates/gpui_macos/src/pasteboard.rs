@@ -302,7 +302,7 @@ impl UTType {
 mod tests {
     use cocoa::{appkit::NSPasteboardTypeString, foundation::NSData};
 
-    use crate::{ClipboardEntry, ClipboardItem, ClipboardString};
+    use gpui::{ClipboardEntry, ClipboardItem, ClipboardString};
 
     use super::*;
 
