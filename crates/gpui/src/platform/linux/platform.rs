@@ -90,7 +90,7 @@ impl<T> ResultExt for anyhow::Result<T> {
     }
 }
 
-pub trait LinuxClient {
+pub(crate) trait LinuxClient {
     fn compositor_name(&self) -> &'static str;
     fn with_common<R>(&self, f: impl FnOnce(&mut LinuxCommon) -> R) -> R;
     fn keyboard_layout(&self) -> Box<dyn PlatformKeyboardLayout>;

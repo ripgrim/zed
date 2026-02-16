@@ -7436,7 +7436,6 @@ dependencies = [
  "scheduler",
  "schemars",
  "seahash",
- "semver",
  "serde",
  "serde_json",
  "slotmap",
