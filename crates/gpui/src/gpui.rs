@@ -36,6 +36,7 @@ pub mod prelude;
 /// Profiling utilities for task timing and thread performance tracking.
 pub mod profiler;
 #[cfg(any(target_os = "windows", target_os = "linux"))]
+#[expect(missing_docs)]
 pub mod queue;
 mod scene;
 mod shared_string;
