@@ -1,10 +1,9 @@
 use anyhow::{Context as _, Result};
 use buffer_diff::BufferDiff;
 use collections::HashMap;
-use editor::display_map::{BlockPlacement, BlockProperties, BlockStyle};
 use editor::{
-    Addon, Editor, EditorEvent, ExcerptRange, MultiBuffer, SelectionEffects,
-    multibuffer_context_lines, scroll::Autoscroll,
+    Addon, Editor, EditorEvent, MultiBuffer, SelectionEffects, multibuffer_context_lines,
+    scroll::Autoscroll,
 };
 use git::repository::{CommitDetails, CommitDiff, RepoPath, is_binary_content};
 use git::status::{FileStatus, StatusCode, TrackedStatus};
@@ -15,8 +14,8 @@ use gpui::{
     PromptLevel, Render, SharedString, Styled, Task, WeakEntity, Window, actions,
 };
 use language::{
-    Anchor, Buffer, Capability, DiskState, File, LanguageRegistry, LineEnding, OffsetRangeExt as _,
-    Point, ReplicaId, Rope, TextBuffer,
+    Buffer, Capability, DiskState, File, LanguageRegistry, LineEnding, OffsetRangeExt as _,
+    ReplicaId, Rope, TextBuffer,
 };
 use multi_buffer::PathKey;
 use project::{Project, WorktreeId, git_store::Repository};
@@ -110,7 +109,6 @@ impl Addon for CommitDiffAddon {
     }
 }
 
-const COMMIT_MESSAGE_SORT_PREFIX: u64 = 0;
 const FILE_NAMESPACE_SORT_PREFIX: u64 = 1;
 
 impl CommitView {
@@ -212,31 +210,6 @@ impl CommitView {
             })
             .collect();
 
-        let message_buffer = cx.new(|cx| {
-            let mut buffer = Buffer::local(commit.message.clone(), cx);
-            buffer.set_capability(Capability::ReadOnly, cx);
-            buffer
-        });
-
-        multibuffer.update(cx, |multibuffer, cx| {
-            let snapshot = message_buffer.read(cx).snapshot();
-            let full_range = Point::zero()..snapshot.max_point();
-            let range = ExcerptRange {
-                context: full_range.clone(),
-                primary: full_range,
-            };
-            multibuffer.set_excerpt_ranges_for_path(
-                PathKey::with_sort_prefix(
-                    COMMIT_MESSAGE_SORT_PREFIX,
-                    RelPath::unix("commit message").unwrap().into(),
-                ),
-                message_buffer.clone(),
-                &snapshot,
-                vec![range],
-                cx,
-            )
-        });
-
         let editor = cx.new(|cx| {
             let mut editor =
                 Editor::for_multibuffer(multibuffer.clone(), Some(project.clone()), window, cx);
@@ -245,34 +218,6 @@ impl CommitView {
             editor.set_show_breakpoints(false, cx);
             editor.set_show_diff_review_button(true, cx);
             editor.set_expand_all_diff_hunks(cx);
-            editor.disable_header_for_buffer(message_buffer.read(cx).remote_id(), cx);
-            editor.disable_indent_guides_for_buffer(message_buffer.read(cx).remote_id(), cx);
-
-            editor.insert_blocks(
-                [BlockProperties {
-                    placement: BlockPlacement::Above(editor::Anchor::min()),
-                    height: Some(1),
-                    style: BlockStyle::Sticky,
-                    render: Arc::new(|_| gpui::Empty.into_any_element()),
-                    priority: 0,
-                }]
-                .into_iter()
-                .chain(
-                    editor
-                        .buffer()
-                        .read(cx)
-                        .buffer_anchor_to_anchor(&message_buffer, Anchor::MAX, cx)
-                        .map(|anchor| BlockProperties {
-                            placement: BlockPlacement::Below(anchor),
-                            height: Some(1),
-                            style: BlockStyle::Sticky,
-                            render: Arc::new(|_| gpui::Empty.into_any_element()),
-                            priority: 0,
-                        }),
-                ),
-                None,
-                cx,
-            );
 
             editor
         });
