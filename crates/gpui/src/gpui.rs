@@ -36,7 +36,7 @@ pub mod prelude;
 /// Profiling utilities for task timing and thread performance tracking.
 pub mod profiler;
 #[cfg(any(target_os = "windows", target_os = "linux"))]
-mod queue;
+pub mod queue;
 mod scene;
 mod shared_string;
 mod shared_uri;

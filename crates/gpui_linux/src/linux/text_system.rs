@@ -227,7 +227,7 @@ impl CosmicTextSystemState {
         features: &FontFeatures,
     ) -> Result<SmallVec<[FontId; 4]>> {
         // TODO: Determine the proper system UI font.
-        let name = gpui::text_system::font_name_with_fallbacks(name, "IBM Plex Sans");
+        let name = gpui::font_name_with_fallbacks(name, "IBM Plex Sans");
 
         let families = self
             .font_system
