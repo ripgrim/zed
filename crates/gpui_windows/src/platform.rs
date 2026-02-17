@@ -715,7 +715,7 @@ impl Platform for WindowsPlatform {
     }
 
     fn read_credentials(&self, url: &str) -> Task<Result<Option<(String, Vec<u8>)>>> {
-        let mut target_name = windows_credentials_target_name(url)
+        let target_name = windows_credentials_target_name(url)
             .encode_utf16()
             .chain(Some(0))
             .collect_vec();

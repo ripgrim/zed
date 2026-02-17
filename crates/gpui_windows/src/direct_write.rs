@@ -570,7 +570,7 @@ impl DirectWriteState {
                 layout
             };
 
-            let (mut ascent, mut descent) = {
+            let (ascent, descent) = {
                 let mut first_metrics = [DWRITE_LINE_METRICS::default(); 4];
                 let mut line_count = 0u32;
                 text_layout.GetLineMetrics(Some(&mut first_metrics), &mut line_count)?;

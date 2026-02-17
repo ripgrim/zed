@@ -15,6 +15,7 @@ use windows::{
     core::*,
 };
 
+use crate::logical_point;
 use gpui::{Bounds, DevicePixels, DisplayId, Pixels, PlatformDisplay, point, size};
 
 #[derive(Debug, Clone, Copy)]
