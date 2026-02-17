@@ -5,9 +5,6 @@ mod keystroke;
 #[cfg(all(target_os = "linux", feature = "wayland"))]
 pub mod layer_shell;
 
-#[cfg(target_os = "macos")]
-mod mac;
-
 #[cfg(any(test, feature = "test-support"))]
 mod test;
 
@@ -20,10 +17,15 @@ mod visual_test;
 ))]
 pub mod scap_screen_capture;
 
-#[cfg(all(target_os = "windows", feature = "screen-capture"))]
+#[cfg(all(
+    any(target_os = "windows", target_os = "linux"),
+    feature = "screen-capture"
+))]
 pub(crate) type PlatformScreenCaptureFrame = scap::frame::Frame;
-#[cfg(all(target_os = "windows", not(feature = "screen-capture")))]
+#[cfg(not(feature = "screen-capture"))]
 pub(crate) type PlatformScreenCaptureFrame = ();
+#[cfg(all(target_os = "macos", feature = "screen-capture"))]
+pub(crate) type PlatformScreenCaptureFrame = core_video::image_buffer::CVImageBuffer;
 
 use crate::{
     Action, AnyWindowHandle, App, AsyncWindowContext, BackgroundExecutor, Bounds,
