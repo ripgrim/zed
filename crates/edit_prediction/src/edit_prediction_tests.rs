@@ -2277,7 +2277,7 @@ async fn test_diagnostic_prediction_deduplication(cx: &mut TestAppContext) {
         "/root",
         json!({
             "main.rs": "fn main() {\n    let x = 1;\n    let y = 2;\n    let z = 3;\n}\n",
-            "lib.rs":  "fn helper() {\n    todo!()\n}\n"
+            "lib.rs":  "fn helper() {\n    todo()\n}\n"
         }),
     )
     .await;
