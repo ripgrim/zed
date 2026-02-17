@@ -469,7 +469,7 @@ impl DirectWriteState {
         let family = if family == SYSTEM_UI_FONT_NAME {
             system_ui_font_name
         } else {
-            font_name_with_fallbacks_shared(&family, &system_ui_font_name)
+            gpui::font_name_with_fallbacks_shared(&family, &system_ui_font_name)
         };
         let fontset = unsafe { collection.GetFontSet().log_err()? };
         let font_family_h = HSTRING::from(family.as_str());
@@ -477,9 +477,9 @@ impl DirectWriteState {
             fontset
                 .GetMatchingFonts(
                     &font_family_h,
-                    weight.into(),
+                    font_weight_to_dwrite(weight),
                     DWRITE_FONT_STRETCH_NORMAL,
-                    style.into(),
+                    font_style_to_dwrite(style),
                 )
                 .log_err()?
         };
@@ -543,7 +543,7 @@ impl DirectWriteState {
                         font_info.font_face.GetWeight(),
                         font_info.font_face.GetStyle(),
                         DWRITE_FONT_STRETCH_NORMAL,
-                        font_size.0,
+                        font_size.as_f32(),
                         &components.locale,
                     )?
                     .cast()?;
@@ -595,9 +595,9 @@ impl DirectWriteState {
                 text_layout.SetFontCollection(collection, text_range)?;
                 text_layout.SetFontFamilyName(&font_info.font_family_h, text_range)?;
                 let font_size = if break_ligatures {
-                    font_size.0.next_up()
+                    font_size.as_f32().next_up()
                 } else {
-                    font_size.0
+                    font_size.as_f32()
                 };
                 text_layout.SetFontSize(font_size, text_range)?;
                 text_layout.SetFontStyle(font_info.font_face.GetStyle(), text_range)?;
@@ -674,7 +674,7 @@ impl DirectWriteState {
         let offset = [DWRITE_GLYPH_OFFSET::default()];
         let glyph_run = DWRITE_GLYPH_RUN {
             fontFace: ManuallyDrop::new(Some(unsafe { std::ptr::read(&***font.font_face) })),
-            fontEmSize: params.font_size.0,
+            fontEmSize: params.font_size.as_f32(),
             glyphCount: 1,
             glyphIndices: glyph_id.as_ptr(),
             glyphAdvances: advance.as_ptr(),
@@ -692,14 +692,15 @@ impl DirectWriteState {
         };
         let baseline_origin_x =
             params.subpixel_variant.x as f32 / SUBPIXEL_VARIANTS_X as f32 / params.scale_factor;
-        let baseline_origin_y =
-            params.subpixel_variant.y as f32 / SUBPIXEL_VARIANTS_Y as f32 / params.scale_factor;
+        let baseline_origin_y = params.subpixel_variant.y as f32
+            / gpui::SUBPIXEL_VARIANTS_Y as f32
+            / params.scale_factor;
 
         let mut rendering_mode = DWRITE_RENDERING_MODE1::default();
         let mut grid_fit_mode = DWRITE_GRID_FIT_MODE::default();
         unsafe {
             font.font_face.GetRecommendedRenderingMode(
-                params.font_size.0,
+                params.font_size.as_f32(),
                 // Using 96 as scale is applied by the transform
                 96.0,
                 96.0,
@@ -905,7 +906,7 @@ impl DirectWriteState {
         }];
         let glyph_run = DWRITE_GLYPH_RUN {
             fontFace: ManuallyDrop::new(Some(unsafe { std::ptr::read(&***font.font_face) })),
-            fontEmSize: params.font_size.0,
+            fontEmSize: params.font_size.as_f32(),
             glyphCount: 1,
             glyphIndices: glyph_id.as_ptr(),
             glyphAdvances: advance.as_ptr(),
@@ -1526,7 +1527,7 @@ impl IDWriteTextRenderer_Impl for TextRenderer_Impl {
         let cluster_map =
             unsafe { std::slice::from_raw_parts(desc.clusterMap, desc.stringLength as usize) };
 
-        let mut cluster_analyzer = ClusterAnalyzer::new(cluster_map, glyph_count);
+        let cluster_analyzer = ClusterAnalyzer::new(cluster_map, glyph_count);
         let mut utf16_idx = desc.textPosition as usize;
         let mut glyph_idx = 0;
         let mut glyphs = Vec::with_capacity(glyph_count);
@@ -1643,37 +1644,29 @@ impl<'a> StringIndexConverter<'a> {
     }
 }
 
-impl Into<DWRITE_FONT_STYLE> for FontStyle {
-    fn into(self) -> DWRITE_FONT_STYLE {
-        match self {
-            FontStyle::Normal => DWRITE_FONT_STYLE_NORMAL,
-            FontStyle::Italic => DWRITE_FONT_STYLE_ITALIC,
-            FontStyle::Oblique => DWRITE_FONT_STYLE_OBLIQUE,
-        }
+fn font_style_to_dwrite(style: FontStyle) -> DWRITE_FONT_STYLE {
+    match style {
+        FontStyle::Normal => DWRITE_FONT_STYLE_NORMAL,
+        FontStyle::Italic => DWRITE_FONT_STYLE_ITALIC,
+        FontStyle::Oblique => DWRITE_FONT_STYLE_OBLIQUE,
     }
 }
 
-impl From<DWRITE_FONT_STYLE> for FontStyle {
-    fn from(value: DWRITE_FONT_STYLE) -> Self {
-        match value.0 {
-            0 => FontStyle::Normal,
-            1 => FontStyle::Italic,
-            2 => FontStyle::Oblique,
-            _ => unreachable!(),
-        }
+fn font_style_from_dwrite(value: DWRITE_FONT_STYLE) -> FontStyle {
+    match value.0 {
+        0 => FontStyle::Normal,
+        1 => FontStyle::Italic,
+        2 => FontStyle::Oblique,
+        _ => unreachable!(),
     }
 }
 
-impl Into<DWRITE_FONT_WEIGHT> for FontWeight {
-    fn into(self) -> DWRITE_FONT_WEIGHT {
-        DWRITE_FONT_WEIGHT(self.0 as i32)
-    }
+fn font_weight_to_dwrite(weight: FontWeight) -> DWRITE_FONT_WEIGHT {
+    DWRITE_FONT_WEIGHT(weight.0 as i32)
 }
 
-impl From<DWRITE_FONT_WEIGHT> for FontWeight {
-    fn from(value: DWRITE_FONT_WEIGHT) -> Self {
-        FontWeight(value.0 as f32)
-    }
+fn font_weight_from_dwrite(value: DWRITE_FONT_WEIGHT) -> FontWeight {
+    FontWeight(value.0 as f32)
 }
 
 fn get_font_names_from_collection(
@@ -1708,8 +1701,8 @@ fn font_face_to_font(font_face: &IDWriteFontFace3, locale: &HSTRING) -> Option<F
     Some(Font {
         family: family_name.into(),
         features: FontFeatures::default(),
-        weight: weight.into(),
-        style: style.into(),
+        weight: font_weight_from_dwrite(weight),
+        style: font_style_from_dwrite(style),
         fallbacks: None,
     })
 }

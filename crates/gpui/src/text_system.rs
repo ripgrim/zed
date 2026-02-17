@@ -44,12 +44,12 @@ pub struct FontFamilyId(pub usize);
 /// Number of subpixel glyph variants along the X axis.
 pub const SUBPIXEL_VARIANTS_X: u8 = 4;
 
-pub(crate) const SUBPIXEL_VARIANTS_Y: u8 =
-    if cfg!(target_os = "windows") || cfg!(target_os = "linux") {
-        1
-    } else {
-        SUBPIXEL_VARIANTS_X
-    };
+/// Number of subpixel glyph variants along the Y axis.
+pub const SUBPIXEL_VARIANTS_Y: u8 = if cfg!(target_os = "windows") || cfg!(target_os = "linux") {
+    1
+} else {
+    SUBPIXEL_VARIANTS_X
+};
 
 /// The GPUI text rendering sub system.
 pub struct TextSystem {
@@ -970,8 +970,9 @@ pub fn font_name_with_fallbacks<'a>(name: &'a str, system: &'a str) -> &'a str {
     }
 }
 
+/// Like [`font_name_with_fallbacks`] but accepts and returns [`SharedString`] references.
 #[allow(unused)]
-pub(crate) fn font_name_with_fallbacks_shared<'a>(
+pub fn font_name_with_fallbacks_shared<'a>(
     name: &'a SharedString,
     system: &'a SharedString,
 ) -> &'a SharedString {

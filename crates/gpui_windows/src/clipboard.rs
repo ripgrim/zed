@@ -229,7 +229,8 @@ fn write_image_to_clipboard(item: &Image) -> Result<()> {
 }
 
 fn convert_image_to_png_format(bytes: &[u8], image_format: ImageFormat) -> Result<Vec<u8>> {
-    let image = image::load_from_memory_with_format(bytes, image_format.into())?;
+    let image =
+        image::load_from_memory_with_format(bytes, gpui_image_format_to_image(image_format))?;
     let mut output_buf = Vec::new();
     image.write_to(
         &mut std::io::Cursor::new(&mut output_buf),
@@ -440,17 +441,15 @@ where
     Some(result)
 }
 
-impl From<ImageFormat> for image::ImageFormat {
-    fn from(value: ImageFormat) -> Self {
-        match value {
-            ImageFormat::Png => image::ImageFormat::Png,
-            ImageFormat::Jpeg => image::ImageFormat::Jpeg,
-            ImageFormat::Webp => image::ImageFormat::WebP,
-            ImageFormat::Gif => image::ImageFormat::Gif,
-            // TODO: ImageFormat::Svg
-            ImageFormat::Bmp => image::ImageFormat::Bmp,
-            ImageFormat::Tiff => image::ImageFormat::Tiff,
-            _ => unreachable!(),
-        }
+fn gpui_image_format_to_image(value: ImageFormat) -> image::ImageFormat {
+    match value {
+        ImageFormat::Png => image::ImageFormat::Png,
+        ImageFormat::Jpeg => image::ImageFormat::Jpeg,
+        ImageFormat::Webp => image::ImageFormat::WebP,
+        ImageFormat::Gif => image::ImageFormat::Gif,
+        // TODO: ImageFormat::Svg
+        ImageFormat::Bmp => image::ImageFormat::Bmp,
+        ImageFormat::Tiff => image::ImageFormat::Tiff,
+        _ => unreachable!(),
     }
 }

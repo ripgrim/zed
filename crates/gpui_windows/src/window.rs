@@ -343,7 +343,7 @@ impl WindowsWindowInner {
 #[derive(Default)]
 pub(crate) struct Callbacks {
     pub(crate) request_frame: Cell<Option<Box<dyn FnMut(RequestFrameOptions)>>>,
-    pub(crate) input: Cell<Option<Box<dyn FnMut(crate::PlatformInput) -> DispatchEventResult>>>,
+    pub(crate) input: Cell<Option<Box<dyn FnMut(PlatformInput) -> DispatchEventResult>>>,
     pub(crate) active_status_change: Cell<Option<Box<dyn FnMut(bool)>>>,
     pub(crate) hovered_status_change: Cell<Option<Box<dyn FnMut(bool)>>>,
     pub(crate) resize: Cell<Option<Box<dyn FnMut(Size<Pixels>, f32)>>>,
@@ -577,8 +577,7 @@ impl PlatformWindow for WindowsWindow {
 
     fn resize(&mut self, size: Size<Pixels>) {
         let hwnd = self.0.hwnd;
-        let bounds =
-            crate::bounds(self.bounds().origin, size).to_device_pixels(self.scale_factor());
+        let bounds = gpui::bounds(self.bounds().origin, size).to_device_pixels(self.scale_factor());
         let rect = calculate_window_rect(bounds, &self.state.border_offset);
 
         self.0
@@ -664,15 +663,15 @@ impl PlatformWindow for WindowsWindow {
                     let title;
                     let main_icon;
                     match level {
-                        crate::PromptLevel::Info => {
+                        PromptLevel::Info => {
                             title = windows::core::w!("Info");
                             main_icon = TD_INFORMATION_ICON;
                         }
-                        crate::PromptLevel::Warning => {
+                        PromptLevel::Warning => {
                             title = windows::core::w!("Warning");
                             main_icon = TD_WARNING_ICON;
                         }
-                        crate::PromptLevel::Critical => {
+                        PromptLevel::Critical => {
                             title = windows::core::w!("Critical");
                             main_icon = TD_ERROR_ICON;
                         }
@@ -936,9 +935,9 @@ impl PlatformWindow for WindowsWindow {
     fn update_ime_position(&self, bounds: Bounds<Pixels>) {
         let scale_factor = self.state.scale_factor.get();
         let caret_position = POINT {
-            x: (bounds.origin.x.0 * scale_factor) as i32,
-            y: (bounds.origin.y.0 * scale_factor) as i32
-                + ((bounds.size.height.0 * scale_factor) as i32 / 2),
+            x: (bounds.origin.x.as_f32() * scale_factor) as i32,
+            y: (bounds.origin.y.as_f32() * scale_factor) as i32
+                + ((bounds.size.height.as_f32() * scale_factor) as i32 / 2),
         };
 
         self.0.update_ime_position(self.0.hwnd, caret_position);
@@ -1477,13 +1476,12 @@ fn set_non_rude_hwnd(hwnd: HWND, non_rude: bool) {
 #[cfg(test)]
 mod tests {
     use super::ClickState;
-    use crate::*;
     use gpui::{DevicePixels, MouseButton, point};
     use std::time::Duration;
 
     #[test]
     fn test_double_click_interval() {
-        let mut state = ClickState::new();
+        let state = ClickState::new();
         assert_eq!(
             state.update(MouseButton::Left, point(DevicePixels(0), DevicePixels(0))),
             1
@@ -1511,7 +1509,7 @@ mod tests {
 
     #[test]
     fn test_double_click_spatial_tolerance() {
-        let mut state = ClickState::new();
+        let state = ClickState::new();
         assert_eq!(
             state.update(MouseButton::Left, point(DevicePixels(-3), DevicePixels(0))),
             1

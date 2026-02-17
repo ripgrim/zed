@@ -112,7 +112,7 @@ impl WindowsPlatform {
         } else {
             (
                 None,
-                Arc::new(crate::NoopTextSystem::new()) as Arc<dyn PlatformTextSystem>,
+                Arc::new(gpui::NoopTextSystem::new()) as Arc<dyn PlatformTextSystem>,
                 None,
             )
         };
@@ -453,7 +453,7 @@ impl Platform for WindowsPlatform {
                     reason = "We are restarting ourselves, using std command thus is fine"
                 )]
                 let restart_process =
-                    util::command::new_std_command(util::shell::get_windows_system_shell())
+                    ::util::command::new_std_command(::util::shell::get_windows_system_shell())
                         .arg("-command")
                         .arg(script)
                         .spawn();
@@ -497,7 +497,7 @@ impl Platform for WindowsPlatform {
     fn screen_capture_sources(
         &self,
     ) -> oneshot::Receiver<Result<Vec<Rc<dyn ScreenCaptureSource>>>> {
-        crate::platform::scap_screen_capture::scap_screen_sources(&self.foreground_executor)
+        gpui::scap_screen_capture::scap_screen_sources(&self.foreground_executor)
     }
 
     fn active_window(&self) -> Option<AnyWindowHandle> {
@@ -684,7 +684,7 @@ impl Platform for WindowsPlatform {
     }
 
     fn write_credentials(&self, url: &str, username: &str, password: &[u8]) -> Task<Result<()>> {
-        let mut password = password.to_vec();
+        let password = password.to_vec();
         let mut username = username.encode_utf16().chain(Some(0)).collect_vec();
         let mut target_name = windows_credentials_target_name(url)
             .encode_utf16()
@@ -757,7 +757,7 @@ impl Platform for WindowsPlatform {
     }
 
     fn delete_credentials(&self, url: &str) -> Task<Result<()>> {
-        let mut target_name = windows_credentials_target_name(url)
+        let target_name = windows_credentials_target_name(url)
             .encode_utf16()
             .chain(Some(0))
             .collect_vec();

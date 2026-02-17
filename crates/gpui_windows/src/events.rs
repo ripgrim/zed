@@ -128,13 +128,13 @@ impl WindowsWindowInner {
         );
         self.state.origin.set(origin);
         let size = self.state.logical_size.get();
-        let center_x = origin.x.0 + size.width.0 / 2.;
-        let center_y = origin.y.0 + size.height.0 / 2.;
+        let center_x = origin.x.as_f32() + size.width.as_f32() / 2.;
+        let center_y = origin.y.as_f32() + size.height.as_f32() / 2.;
         let monitor_bounds = self.state.display.get().bounds();
-        if center_x < monitor_bounds.left().0
-            || center_x > monitor_bounds.right().0
-            || center_y < monitor_bounds.top().0
-            || center_y > monitor_bounds.bottom().0
+        if center_x < monitor_bounds.left().as_f32()
+            || center_x > monitor_bounds.right().as_f32()
+            || center_y < monitor_bounds.top().as_f32()
+            || center_y > monitor_bounds.bottom().as_f32()
         {
             // center of the window may have moved to another monitor
             let monitor = unsafe { MonitorFromWindow(handle, MONITOR_DEFAULTTONULL) };
@@ -161,10 +161,10 @@ impl WindowsWindowInner {
 
         unsafe {
             let minmax_info = &mut *(lparam.0 as *mut MINMAXINFO);
-            minmax_info.ptMinTrackSize.x =
-                min_size.width.scale(scale_factor).0 as i32 + boarder_offset.width_offset.get();
-            minmax_info.ptMinTrackSize.y =
-                min_size.height.scale(scale_factor).0 as i32 + boarder_offset.height_offset.get();
+            minmax_info.ptMinTrackSize.x = min_size.width.scale(scale_factor).as_f32() as i32
+                + boarder_offset.width_offset.get();
+            minmax_info.ptMinTrackSize.y = min_size.height.scale(scale_factor).as_f32() as i32
+                + boarder_offset.height_offset.get();
         }
         Some(0)
     }
@@ -578,9 +578,9 @@ impl WindowsWindowInner {
             let caret_position = input_handler.bounds_for_range(caret_range.range)?;
             Some(POINT {
                 // logical to physical
-                x: (caret_position.origin.x.0 * scale_factor) as i32,
-                y: (caret_position.origin.y.0 * scale_factor) as i32
-                    + ((caret_position.size.height.0 * scale_factor) as i32 / 2),
+                x: (caret_position.origin.x.as_f32() * scale_factor) as i32,
+                y: (caret_position.origin.y.as_f32() * scale_factor) as i32
+                    + ((caret_position.size.height.as_f32() * scale_factor) as i32 / 2),
             })
         })
     }

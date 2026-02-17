@@ -1592,7 +1592,7 @@ impl<T: Clone + Debug + Default + PartialEq + Display + Add<T, Output = T>> Disp
 
 impl Size<DevicePixels> {
     /// Converts the size from physical to logical pixels.
-    pub(crate) fn to_pixels(self, scale_factor: f32) -> Size<Pixels> {
+    pub fn to_pixels(self, scale_factor: f32) -> Size<Pixels> {
         size(
             px(self.width.0 as f32 / scale_factor),
             px(self.height.0 as f32 / scale_factor),
@@ -2972,6 +2972,11 @@ impl From<usize> for DevicePixels {
 pub struct ScaledPixels(pub(crate) f32);
 
 impl ScaledPixels {
+    /// Returns the raw `f32` value of this `ScaledPixels`.
+    pub fn as_f32(self) -> f32 {
+        self.0
+    }
+
     /// Floors the `ScaledPixels` value to the nearest whole number.
     ///
     /// # Returns

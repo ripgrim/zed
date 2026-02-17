@@ -24,7 +24,7 @@ use windows::{
 use crate::{HWND, SafeHwnd, WM_GPUI_TASK_DISPATCHED_ON_MAIN_THREAD};
 use gpui::{
     GLOBAL_THREAD_TIMINGS, PlatformDispatcher, Priority, PriorityQueueSender, RunnableVariant,
-    THREAD_TIMINGS, TaskTiming, ThreadTaskTimings, TimerResolutionGuard, profiler,
+    THREAD_TIMINGS, TaskTiming, ThreadTaskTimings, TimerResolutionGuard,
 };
 
 pub(crate) struct WindowsDispatcher {
@@ -96,14 +96,14 @@ impl WindowsDispatcher {
             start,
             end: None,
         };
-        profiler::add_task_timing(timing);
+        gpui::profiler::add_task_timing(timing);
 
         runnable.run();
 
         let end = Instant::now();
         timing.end = Some(end);
 
-        profiler::add_task_timing(timing);
+        gpui::profiler::add_task_timing(timing);
     }
 }
 
@@ -113,7 +113,7 @@ impl PlatformDispatcher for WindowsDispatcher {
         ThreadTaskTimings::convert(&global_thread_timings)
     }
 
-    fn get_current_thread_timings(&self) -> Vec<crate::TaskTiming> {
+    fn get_current_thread_timings(&self) -> Vec<TaskTiming> {
         THREAD_TIMINGS.with(|timings| {
             let timings = timings.lock();
             let timings = &timings.timings;
