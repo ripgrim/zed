@@ -39,8 +39,6 @@ pub(crate) struct TestPlatform {
     pub opened_url: RefCell<Option<String>>,
     pub text_system: Arc<dyn PlatformTextSystem>,
     pub expect_restart: RefCell<Option<oneshot::Sender<Option<PathBuf>>>>,
-    #[cfg(target_os = "windows")]
-    bitmap_factory: std::mem::ManuallyDrop<IWICImagingFactory>,
     weak: Weak<Self>,
 }
 
@@ -95,16 +93,6 @@ pub(crate) struct TestPrompts {
 
 impl TestPlatform {
     pub fn new(executor: BackgroundExecutor, foreground_executor: ForegroundExecutor) -> Rc<Self> {
-        #[cfg(target_os = "windows")]
-        let bitmap_factory = unsafe {
-            windows::Win32::System::Ole::OleInitialize(None)
-                .expect("unable to initialize Windows OLE");
-            std::mem::ManuallyDrop::new(
-                CoCreateInstance(&CLSID_WICImagingFactory, None, CLSCTX_INPROC_SERVER)
-                    .expect("Error creating bitmap factory."),
-            )
-        };
-
         let text_system = Arc::new(NoopTextSystem);
 
         Rc::new_cyclic(|weak| TestPlatform {
@@ -123,8 +111,6 @@ impl TestPlatform {
             current_find_pasteboard_item: Mutex::new(None),
             weak: weak.clone(),
             opened_url: Default::default(),
-            #[cfg(target_os = "windows")]
-            bitmap_factory,
             text_system,
         })
     }
@@ -455,16 +441,6 @@ impl TestScreenCaptureSource {
     /// Create a fake screen capture source, for testing.
     pub fn new() -> Self {
         Self {}
-    }
-}
-
-#[cfg(target_os = "windows")]
-impl Drop for TestPlatform {
-    fn drop(&mut self) {
-        unsafe {
-            std::mem::ManuallyDrop::drop(&mut self.bitmap_factory);
-            windows::Win32::System::Ole::OleUninitialize();
-        }
     }
 }
 
