@@ -175,17 +175,6 @@ fn is_color_light(color: &Color) -> bool {
     ((5 * color.G as u32) + (2 * color.R as u32) + color.B as u32) > (8 * 128)
 }
 
-pub(crate) fn show_error(title: &str, content: String) {
-    let _ = unsafe {
-        MessageBoxW(
-            None,
-            &HSTRING::from(content),
-            &HSTRING::from(title),
-            MB_ICONERROR | MB_SYSTEMMODAL,
-        )
-    };
-}
-
 pub(crate) fn with_dll_library<R, F>(dll_name: PCSTR, f: F) -> Result<R>
 where
     F: FnOnce(HMODULE) -> Result<R>,

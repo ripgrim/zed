@@ -602,17 +602,7 @@ pub trait PlatformWindow: HasWindowHandle + HasDisplayHandle {
 pub type RunnableVariant = Runnable<RunnableMeta>;
 
 #[doc(hidden)]
-pub struct TimerResolutionGuard {
-    cleanup: Option<Box<dyn FnOnce() + Send>>,
-}
-
-impl Drop for TimerResolutionGuard {
-    fn drop(&mut self) {
-        if let Some(cleanup) = self.cleanup.take() {
-            cleanup();
-        }
-    }
-}
+pub type TimerResolutionGuard = util::Deferred<Box<dyn FnOnce() + Send>>;
 
 /// This type is public so that our test macro can generate and use it, but it should not
 /// be considered part of our public API.
@@ -631,7 +621,7 @@ pub trait PlatformDispatcher: Send + Sync {
     }
 
     fn increase_timer_resolution(&self) -> TimerResolutionGuard {
-        TimerResolutionGuard { cleanup: None }
+        util::defer(Box::new(|| {}))
     }
 
     #[cfg(any(test, feature = "test-support"))]

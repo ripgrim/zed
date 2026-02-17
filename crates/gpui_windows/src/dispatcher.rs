@@ -199,10 +199,8 @@ impl PlatformDispatcher for WindowsDispatcher {
         unsafe {
             timeBeginPeriod(1);
         }
-        TimerResolutionGuard {
-            cleanup: Some(Box::new(|| unsafe {
-                timeEndPeriod(1);
-            })),
-        }
+        util::defer(Box::new(|| unsafe {
+            timeEndPeriod(1);
+        }))
     }
 }
