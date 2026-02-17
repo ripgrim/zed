@@ -11,7 +11,7 @@ workspace = true
 [lib]
 path = "src/gpui_wgpu.rs"
 
-[dependencies]
+[target.'cfg(not(target_os = "windows"))'.dependencies]
 gpui.workspace = true
 anyhow.workspace = true
 bytemuck = "1"
