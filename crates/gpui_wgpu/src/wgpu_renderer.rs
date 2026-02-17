@@ -1,4 +1,4 @@
-#![not(target_os = "windows")]
+#![cfg(not(target_os = "windows"))]
 use crate::{WgpuAtlas, WgpuContext};
 use bytemuck::{Pod, Zeroable};
 use gpui::{
