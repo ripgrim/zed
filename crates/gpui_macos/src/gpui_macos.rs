@@ -17,7 +17,6 @@ mod screen_capture;
 mod metal_atlas;
 pub mod metal_renderer;
 
-use core_video::image_buffer::CVImageBuffer;
 use metal_renderer as renderer;
 
 #[cfg(feature = "font-kit")]
