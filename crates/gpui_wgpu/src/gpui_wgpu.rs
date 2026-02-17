@@ -1,3 +1,4 @@
+#![cfg(not(target_os = "windows"))]
 mod wgpu_atlas;
 mod wgpu_context;
 mod wgpu_renderer;
