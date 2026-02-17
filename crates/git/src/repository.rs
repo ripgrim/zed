@@ -3675,6 +3675,36 @@ mod tests {
         let result = parse_worktrees_from_str(input);
         assert_eq!(result.len(), 1);
         assert_eq!(result[0].path, PathBuf::from("/home/user/project"));
+
+        // Extra porcelain lines (locked, prunable) should be ignored
+        let input = "worktree /home/user/project\nHEAD abc123\nbranch refs/heads/main\n\n\
+                      worktree /home/user/locked-wt\nHEAD def456\nbranch refs/heads/locked-branch\nlocked\n\n\
+                      worktree /home/user/prunable-wt\nHEAD 789aaa\nbranch refs/heads/prunable-branch\nprunable\n\n";
+        let result = parse_worktrees_from_str(input);
+        assert_eq!(result.len(), 3);
+        assert_eq!(result[0].path, PathBuf::from("/home/user/project"));
+        assert_eq!(result[0].ref_name.as_ref(), "refs/heads/main");
+        assert_eq!(result[1].path, PathBuf::from("/home/user/locked-wt"));
+        assert_eq!(result[1].ref_name.as_ref(), "refs/heads/locked-branch");
+        assert_eq!(result[2].path, PathBuf::from("/home/user/prunable-wt"));
+        assert_eq!(result[2].ref_name.as_ref(), "refs/heads/prunable-branch");
+
+        // Leading/trailing whitespace on lines should be tolerated
+        let input =
+            "  worktree /home/user/project  \n  HEAD abc123  \n  branch refs/heads/main  \n\n";
+        let result = parse_worktrees_from_str(input);
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].path, PathBuf::from("/home/user/project"));
+        assert_eq!(result[0].sha.as_ref(), "abc123");
+        assert_eq!(result[0].ref_name.as_ref(), "refs/heads/main");
+
+        // Windows-style line endings should be handled
+        let input = "worktree /home/user/project\r\nHEAD abc123\r\nbranch refs/heads/main\r\n\r\n";
+        let result = parse_worktrees_from_str(input);
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].path, PathBuf::from("/home/user/project"));
+        assert_eq!(result[0].sha.as_ref(), "abc123");
+        assert_eq!(result[0].ref_name.as_ref(), "refs/heads/main");
     }
 
     #[gpui::test]
