@@ -2,7 +2,10 @@ use anyhow::{Context as _, Result};
 use buffer_diff::BufferDiff;
 use collections::HashMap;
 use editor::display_map::{BlockPlacement, BlockProperties, BlockStyle};
-use editor::{Addon, Editor, EditorEvent, ExcerptRange, MultiBuffer, multibuffer_context_lines};
+use editor::{
+    Addon, Editor, EditorEvent, ExcerptRange, MultiBuffer, SelectionEffects,
+    multibuffer_context_lines, scroll::Autoscroll,
+};
 use git::repository::{CommitDetails, CommitDiff, RepoPath, is_binary_content};
 use git::status::{FileStatus, StatusCode, TrackedStatus};
 use git::{GitHostingProviderRegistry, GitRemote, parse_git_remote_url};
@@ -915,9 +918,30 @@ impl Render for CommitView {
                 body,
             );
 
+            let multibuffer = self.multibuffer.clone();
+            let editor = self.editor.clone();
+
             CommitDetailsSidebar::new(data)
                 .remote(remote)
                 .changed_files(self.changed_files.clone())
+                .on_file_click(move |repo_path, _, window, cx| {
+                    let path_key = PathKey::with_sort_prefix(
+                        FILE_NAMESPACE_SORT_PREFIX,
+                        repo_path.as_ref().clone(),
+                    );
+                    if let Some(position) = multibuffer.read(cx).location_for_path(&path_key, cx) {
+                        editor.update(cx, |editor, cx| {
+                            editor.change_selections(
+                                SelectionEffects::scroll(Autoscroll::focused()),
+                                window,
+                                cx,
+                                |s| {
+                                    s.select_ranges([position..position]);
+                                },
+                            );
+                        });
+                    }
+                })
                 .render(window, cx)
         });
 

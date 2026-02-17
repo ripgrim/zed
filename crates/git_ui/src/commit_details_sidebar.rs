@@ -6,9 +6,11 @@ use git::{
     parse_git_remote_url, repository::RepoPath,
 };
 use gpui::{
-    AnyElement, App, FontWeight, Hsla, IntoElement, ParentElement, SharedString, Styled, Window,
+    AnyElement, App, ClickEvent, FontWeight, Hsla, InteractiveElement, IntoElement, ParentElement,
+    SharedString, Styled, Window,
 };
 use project::git_store::Repository;
+use std::sync::Arc;
 use time::{OffsetDateTime, UtcOffset};
 use ui::{
     Button, ButtonStyle, CopyButton, Icon, IconButton, IconName, IconSize, Label, LabelSize,
@@ -63,6 +65,7 @@ pub struct CommitDetailsSidebar {
     remote: Option<GitRemote>,
     changed_files: Vec<(RepoPath, FileStatus)>,
     on_close: Option<Box<dyn Fn(&mut Window, &mut App) + 'static>>,
+    on_file_click: Option<Arc<dyn Fn(&RepoPath, &ClickEvent, &mut Window, &mut App) + 'static>>,
 }
 
 impl CommitDetailsSidebar {
@@ -72,6 +75,7 @@ impl CommitDetailsSidebar {
             remote: None,
             changed_files: Vec::new(),
             on_close: None,
+            on_file_click: None,
         }
     }
 
@@ -87,6 +91,14 @@ impl CommitDetailsSidebar {
 
     pub fn on_close(mut self, callback: impl Fn(&mut Window, &mut App) + 'static) -> Self {
         self.on_close = Some(Box::new(callback));
+        self
+    }
+
+    pub fn on_file_click(
+        mut self,
+        callback: impl Fn(&RepoPath, &ClickEvent, &mut Window, &mut App) + 'static,
+    ) -> Self {
+        self.on_file_click = Some(Arc::new(callback));
         self
     }
 
@@ -142,6 +154,7 @@ impl CommitDetailsSidebar {
         let accent_color = self.data.accent_color;
         let remote = self.remote.clone();
         let on_close = self.on_close;
+        let on_file_click = self.on_file_click;
         let changed_files = self.changed_files;
 
         v_flex()
@@ -324,7 +337,11 @@ impl CommitDetailsSidebar {
                                             .map(|p| p.as_unix_str().to_string())
                                             .unwrap_or_default();
 
+                                        let on_file_click = on_file_click.clone();
+                                        let path_for_click = path.clone();
+
                                         h_flex()
+                                            .id(SharedString::from(path.as_unix_str().to_string()))
                                             .gap_1()
                                             .overflow_hidden()
                                             .child(git_status_icon(*status))
@@ -339,6 +356,18 @@ impl CommitDetailsSidebar {
                                                         .size(LabelSize::Small)
                                                         .color(Color::Muted)
                                                         .single_line(),
+                                                )
+                                            })
+                                            .when_some(on_file_click, |this, callback| {
+                                                this.cursor_pointer().on_click(
+                                                    move |event, window, cx| {
+                                                        callback(
+                                                            &path_for_click,
+                                                            event,
+                                                            window,
+                                                            cx,
+                                                        );
+                                                    },
                                                 )
                                             })
                                     },
