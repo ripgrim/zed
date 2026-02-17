@@ -227,6 +227,10 @@ impl SelectionsCollection {
             Ok(ix) => ix + 1,
             Err(ix) => ix,
         };
+        // The binary searches can produce start_ix > end_ix when the query range
+        // falls completely outside all selections or when anchor comparison across
+        // excerpts yields inconsistent ordering. In such cases, no selections overlap.
+        let end_ix = end_ix.max(start_ix);
         resolve_selections_wrapping_blocks(&self.disjoint[start_ix..end_ix], snapshot).collect()
     }
 

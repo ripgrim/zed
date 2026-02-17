@@ -32548,3 +32548,40 @@ comment */ˇ»;"#},
         assert_text_with_selections(editor, indoc! {r#"let arr = [«1, 2, 3]ˇ»;"#}, cx);
     });
 }
+
+#[gpui::test]
+fn test_disjoint_in_range_out_of_bounds(cx: &mut TestAppContext) {
+    init_test(cx, |_| {});
+
+    let editor = cx.add_window(|window, cx| {
+        let buffer = MultiBuffer::build_simple("aaa\nbbb\nccc\nddd\n", cx);
+        let mut editor = build_editor(buffer.clone(), window, cx);
+        editor.change_selections(SelectionEffects::no_scroll(), window, cx, |s| {
+            s.select_ranges([
+                MultiBufferOffset(0)..MultiBufferOffset(3), // "aaa"
+            ])
+        });
+        editor
+    });
+
+    editor
+        .update(cx, |editor, cx| {
+            let snapshot = editor.display_snapshot(cx);
+            let buffer_snapshot = snapshot.buffer_snapshot();
+
+            // Create a range that starts after all selections end.
+            // The selections end at offset 3, so we query from offset 12 onwards.
+            let start_anchor = buffer_snapshot.anchor_after(MultiBufferOffset(12)); // after "ccc"
+            let end_anchor = buffer_snapshot.anchor_after(MultiBufferOffset(16)); // end of buffer
+
+            // This should NOT panic, even if the binary searches produce start_ix > end_ix.
+            // Before the fix, this would panic with "slice index starts at X but ends at Y".
+            let selections: Vec<text::Selection<MultiBufferOffset>> = editor
+                .selections
+                .disjoint_in_range(start_anchor..end_anchor, &snapshot);
+
+            // No selections should overlap the queried range
+            assert!(selections.is_empty());
+        })
+        .unwrap();
+}
