@@ -148,7 +148,8 @@ jobs:
               continue
             fi
 
-            git config --local http.https://github.com/.extraheader "AUTHORIZATION: bearer ${GH_TOKEN}"
+            ENCODED_GIT_AUTH="$(printf "x-access-token:%s" "$GH_TOKEN" | base64 | tr -d '\n')"
+            git config --local http.https://github.com/.extraheader "AUTHORIZATION: basic ${ENCODED_GIT_AUTH}"
 
             if ! git fetch origin main; then
               echo "WARNING: Failed to fetch origin/main for $CRASH_ID — skipping"
