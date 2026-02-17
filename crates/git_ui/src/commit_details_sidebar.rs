@@ -6,13 +6,12 @@ use git::{
     parse_git_remote_url, repository::RepoPath,
 };
 use gpui::{
-    AnyElement, App, ClipboardItem, FontWeight, Hsla, IntoElement, ParentElement, SharedString,
-    Styled, Window,
+    AnyElement, App, FontWeight, Hsla, IntoElement, ParentElement, SharedString, Styled, Window,
 };
 use project::git_store::Repository;
 use time::{OffsetDateTime, UtcOffset};
 use ui::{
-    Button, ButtonStyle, Icon, IconButton, IconName, IconSize, Label, LabelSize, Tooltip,
+    Button, ButtonStyle, CopyButton, Icon, IconButton, IconName, IconSize, Label, LabelSize,
     prelude::*,
 };
 
@@ -93,14 +92,6 @@ impl CommitDetailsSidebar {
 
     pub fn render(self, window: &mut Window, cx: &mut App) -> AnyElement {
         let full_sha = self.data.sha.clone();
-        let truncated_sha: SharedString = {
-            let sha_str = full_sha.as_ref();
-            if sha_str.len() > 24 {
-                format!("{}...", &sha_str[..24]).into()
-            } else {
-                full_sha.clone()
-            }
-        };
 
         let date_string = OffsetDateTime::from_unix_timestamp(self.data.commit_timestamp)
             .ok()
@@ -236,22 +227,15 @@ impl CommitDetailsSidebar {
                                             .size(IconSize::Small)
                                             .color(Color::Muted),
                                     )
-                                    .child({
-                                        let copy_sha = full_sha.clone();
-                                        Button::new("sha-button", truncated_sha)
-                                            .style(ButtonStyle::Transparent)
-                                            .label_size(LabelSize::Small)
-                                            .color(Color::Muted)
-                                            .tooltip(Tooltip::text(format!(
-                                                "Copy SHA: {}",
-                                                copy_sha
-                                            )))
-                                            .on_click(move |_, _, cx| {
-                                                cx.write_to_clipboard(ClipboardItem::new_string(
-                                                    copy_sha.to_string(),
-                                                ));
-                                            })
-                                    }),
+                                    .child(
+                                        Label::new(full_sha.clone())
+                                            .size(LabelSize::Small)
+                                            .color(Color::Muted),
+                                    )
+                                    .child(
+                                        CopyButton::new("copy-sha", full_sha.to_string())
+                                            .tooltip_label("Copy SHA"),
+                                    ),
                             )
                             .when_some(remote, |this, remote| {
                                 let provider_name = remote.host.name();
