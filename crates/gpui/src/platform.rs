@@ -3,6 +3,7 @@ mod keyboard;
 mod keystroke;
 
 #[cfg(all(target_os = "linux", feature = "wayland"))]
+#[expect(missing_docs)]
 pub mod layer_shell;
 
 #[cfg(any(test, feature = "test-support"))]
@@ -67,8 +68,6 @@ pub use app_menu::*;
 pub use keyboard::*;
 pub use keystroke::*;
 
-#[cfg(target_os = "macos")]
-pub(crate) use mac::*;
 #[cfg(any(test, feature = "test-support"))]
 pub(crate) use test::*;
 
