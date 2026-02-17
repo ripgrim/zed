@@ -11,7 +11,7 @@ use windows::{
         Foundation::*, Graphics::Dwm::*, System::LibraryLoader::LoadLibraryA,
         UI::WindowsAndMessaging::*,
     },
-    core::{BOOL, HSTRING, PCSTR},
+    core::{BOOL, PCSTR},
 };
 
 use crate::*;
