@@ -2243,107 +2243,41 @@ async fn test_move_start_of_paragraph_end_of_paragraph(cx: &mut TestAppContext) 
     });
     cx.simulate_window_resize(cx.window, size(px(100.), 4. * line_height));
 
-    cx.set_state(
-        &r#"ˇone
-        two
-
-        three
-        fourˇ
-        five
-
-        six"#
-            .unindent(),
-    );
+    // The third line only contains a single space so we can later assert that the
+    // editor's paragraph movement considers a non-blank line as a paragraph
+    // boundary.
+    cx.set_state(&"ˇone\ntwo\n \nthree\nfourˇ\nfive\n\nsix");
 
     cx.update_editor(|editor, window, cx| {
         editor.move_to_end_of_paragraph(&MoveToEndOfParagraph, window, cx)
     });
-    cx.assert_editor_state(
-        &r#"one
-        two
-        ˇ
-        three
-        four
-        five
-        ˇ
-        six"#
-            .unindent(),
-    );
+    cx.assert_editor_state(&"one\ntwo\nˇ \nthree\nfour\nfive\nˇ\nsix");
 
     cx.update_editor(|editor, window, cx| {
         editor.move_to_end_of_paragraph(&MoveToEndOfParagraph, window, cx)
     });
-    cx.assert_editor_state(
-        &r#"one
-        two
-
-        three
-        four
-        five
-        ˇ
-        sixˇ"#
-            .unindent(),
-    );
+    cx.assert_editor_state(&"one\ntwo\n \nthree\nfour\nfive\nˇ\nsixˇ");
 
     cx.update_editor(|editor, window, cx| {
         editor.move_to_end_of_paragraph(&MoveToEndOfParagraph, window, cx)
     });
-    cx.assert_editor_state(
-        &r#"one
-        two
-
-        three
-        four
-        five
-
-        sixˇ"#
-            .unindent(),
-    );
+    cx.assert_editor_state(&"one\ntwo\n \nthree\nfour\nfive\n\nsixˇ");
 
     cx.update_editor(|editor, window, cx| {
         editor.move_to_start_of_paragraph(&MoveToStartOfParagraph, window, cx)
     });
-    cx.assert_editor_state(
-        &r#"one
-        two
-
-        three
-        four
-        five
-        ˇ
-        six"#
-            .unindent(),
-    );
+    cx.assert_editor_state(&"one\ntwo\n \nthree\nfour\nfive\nˇ\nsix");
 
     cx.update_editor(|editor, window, cx| {
         editor.move_to_start_of_paragraph(&MoveToStartOfParagraph, window, cx)
     });
-    cx.assert_editor_state(
-        &r#"one
-        two
-        ˇ
-        three
-        four
-        five
 
-        six"#
-            .unindent(),
-    );
+    cx.assert_editor_state(&"one\ntwo\nˇ \nthree\nfour\nfive\n\nsix");
 
     cx.update_editor(|editor, window, cx| {
         editor.move_to_start_of_paragraph(&MoveToStartOfParagraph, window, cx)
     });
-    cx.assert_editor_state(
-        &r#"ˇone
-        two
-
-        three
-        four
-        five
-
-        six"#
-            .unindent(),
-    );
+    cx.assert_editor_state(&"ˇone\ntwo\n \nthree\nfour\nfive\n\nsix");
 }
 
 #[gpui::test]
@@ -3449,6 +3383,265 @@ async fn test_newline_below(cx: &mut TestAppContext) {
         ˇ
         ˇ
     "});
+}
+
+#[gpui::test]
+fn test_newline_below_multibuffer(cx: &mut TestAppContext) {
+    init_test(cx, |_| {});
+
+    let buffer_1 = cx.new(|cx| Buffer::local("aaa\nbbb\nccc", cx));
+    let buffer_2 = cx.new(|cx| Buffer::local("ddd\neee\nfff", cx));
+    let multibuffer = cx.new(|cx| {
+        let mut multibuffer = MultiBuffer::new(ReadWrite);
+        multibuffer.push_excerpts(
+            buffer_1.clone(),
+            [ExcerptRange::new(Point::new(0, 0)..Point::new(2, 3))],
+            cx,
+        );
+        multibuffer.push_excerpts(
+            buffer_2.clone(),
+            [ExcerptRange::new(Point::new(0, 0)..Point::new(2, 3))],
+            cx,
+        );
+        multibuffer
+    });
+
+    cx.add_window(|window, cx| {
+        let mut editor = build_editor(multibuffer, window, cx);
+
+        assert_eq!(
+            editor.text(cx),
+            indoc! {"
+                aaa
+                bbb
+                ccc
+                ddd
+                eee
+                fff"}
+        );
+
+        // Cursor on the last line of the first excerpt.
+        // The newline should be inserted within the first excerpt (buffer_1),
+        // not in the second excerpt (buffer_2).
+        select_ranges(
+            &mut editor,
+            indoc! {"
+                aaa
+                bbb
+                cˇcc
+                ddd
+                eee
+                fff"},
+            window,
+            cx,
+        );
+        editor.newline_below(&NewlineBelow, window, cx);
+        assert_text_with_selections(
+            &mut editor,
+            indoc! {"
+                aaa
+                bbb
+                ccc
+                ˇ
+                ddd
+                eee
+                fff"},
+            cx,
+        );
+        buffer_1.read_with(cx, |buffer, _| {
+            assert_eq!(buffer.text(), "aaa\nbbb\nccc\n");
+        });
+        buffer_2.read_with(cx, |buffer, _| {
+            assert_eq!(buffer.text(), "ddd\neee\nfff");
+        });
+
+        editor
+    });
+}
+
+#[gpui::test]
+fn test_newline_below_multibuffer_middle_of_excerpt(cx: &mut TestAppContext) {
+    init_test(cx, |_| {});
+
+    let buffer_1 = cx.new(|cx| Buffer::local("aaa\nbbb\nccc", cx));
+    let buffer_2 = cx.new(|cx| Buffer::local("ddd\neee\nfff", cx));
+    let multibuffer = cx.new(|cx| {
+        let mut multibuffer = MultiBuffer::new(ReadWrite);
+        multibuffer.push_excerpts(
+            buffer_1.clone(),
+            [ExcerptRange::new(Point::new(0, 0)..Point::new(2, 3))],
+            cx,
+        );
+        multibuffer.push_excerpts(
+            buffer_2.clone(),
+            [ExcerptRange::new(Point::new(0, 0)..Point::new(2, 3))],
+            cx,
+        );
+        multibuffer
+    });
+
+    cx.add_window(|window, cx| {
+        let mut editor = build_editor(multibuffer, window, cx);
+
+        // Cursor in the middle of the first excerpt.
+        select_ranges(
+            &mut editor,
+            indoc! {"
+                aˇaa
+                bbb
+                ccc
+                ddd
+                eee
+                fff"},
+            window,
+            cx,
+        );
+        editor.newline_below(&NewlineBelow, window, cx);
+        assert_text_with_selections(
+            &mut editor,
+            indoc! {"
+                aaa
+                ˇ
+                bbb
+                ccc
+                ddd
+                eee
+                fff"},
+            cx,
+        );
+        buffer_1.read_with(cx, |buffer, _| {
+            assert_eq!(buffer.text(), "aaa\n\nbbb\nccc");
+        });
+        buffer_2.read_with(cx, |buffer, _| {
+            assert_eq!(buffer.text(), "ddd\neee\nfff");
+        });
+
+        editor
+    });
+}
+
+#[gpui::test]
+fn test_newline_below_multibuffer_last_line_of_last_excerpt(cx: &mut TestAppContext) {
+    init_test(cx, |_| {});
+
+    let buffer_1 = cx.new(|cx| Buffer::local("aaa\nbbb\nccc", cx));
+    let buffer_2 = cx.new(|cx| Buffer::local("ddd\neee\nfff", cx));
+    let multibuffer = cx.new(|cx| {
+        let mut multibuffer = MultiBuffer::new(ReadWrite);
+        multibuffer.push_excerpts(
+            buffer_1.clone(),
+            [ExcerptRange::new(Point::new(0, 0)..Point::new(2, 3))],
+            cx,
+        );
+        multibuffer.push_excerpts(
+            buffer_2.clone(),
+            [ExcerptRange::new(Point::new(0, 0)..Point::new(2, 3))],
+            cx,
+        );
+        multibuffer
+    });
+
+    cx.add_window(|window, cx| {
+        let mut editor = build_editor(multibuffer, window, cx);
+
+        // Cursor on the last line of the last excerpt.
+        select_ranges(
+            &mut editor,
+            indoc! {"
+                aaa
+                bbb
+                ccc
+                ddd
+                eee
+                fˇff"},
+            window,
+            cx,
+        );
+        editor.newline_below(&NewlineBelow, window, cx);
+        assert_text_with_selections(
+            &mut editor,
+            indoc! {"
+                aaa
+                bbb
+                ccc
+                ddd
+                eee
+                fff
+                ˇ"},
+            cx,
+        );
+        buffer_1.read_with(cx, |buffer, _| {
+            assert_eq!(buffer.text(), "aaa\nbbb\nccc");
+        });
+        buffer_2.read_with(cx, |buffer, _| {
+            assert_eq!(buffer.text(), "ddd\neee\nfff\n");
+        });
+
+        editor
+    });
+}
+
+#[gpui::test]
+fn test_newline_below_multibuffer_multiple_cursors(cx: &mut TestAppContext) {
+    init_test(cx, |_| {});
+
+    let buffer_1 = cx.new(|cx| Buffer::local("aaa\nbbb\nccc", cx));
+    let buffer_2 = cx.new(|cx| Buffer::local("ddd\neee\nfff", cx));
+    let multibuffer = cx.new(|cx| {
+        let mut multibuffer = MultiBuffer::new(ReadWrite);
+        multibuffer.push_excerpts(
+            buffer_1.clone(),
+            [ExcerptRange::new(Point::new(0, 0)..Point::new(2, 3))],
+            cx,
+        );
+        multibuffer.push_excerpts(
+            buffer_2.clone(),
+            [ExcerptRange::new(Point::new(0, 0)..Point::new(2, 3))],
+            cx,
+        );
+        multibuffer
+    });
+
+    cx.add_window(|window, cx| {
+        let mut editor = build_editor(multibuffer, window, cx);
+
+        // Cursors on the last line of the first excerpt and the first line
+        // of the second excerpt. Each newline should go into its respective buffer.
+        select_ranges(
+            &mut editor,
+            indoc! {"
+                aaa
+                bbb
+                cˇcc
+                dˇdd
+                eee
+                fff"},
+            window,
+            cx,
+        );
+        editor.newline_below(&NewlineBelow, window, cx);
+        assert_text_with_selections(
+            &mut editor,
+            indoc! {"
+                aaa
+                bbb
+                ccc
+                ˇ
+                ddd
+                ˇ
+                eee
+                fff"},
+            cx,
+        );
+        buffer_1.read_with(cx, |buffer, _| {
+            assert_eq!(buffer.text(), "aaa\nbbb\nccc\n");
+        });
+        buffer_2.read_with(cx, |buffer, _| {
+            assert_eq!(buffer.text(), "ddd\n\neee\nfff");
+        });
+
+        editor
+    });
 }
 
 #[gpui::test]
@@ -29056,6 +29249,95 @@ async fn test_sticky_scroll(cx: &mut TestAppContext) {
     assert_eq!(sticky_headers(9.0), vec![]);
     assert_eq!(sticky_headers(9.5), vec![]);
     assert_eq!(sticky_headers(10.0), vec![]);
+}
+
+#[gpui::test]
+async fn test_sticky_scroll_with_expanded_deleted_diff_hunks(
+    executor: BackgroundExecutor,
+    cx: &mut TestAppContext,
+) {
+    init_test(cx, |_| {});
+    let mut cx = EditorTestContext::new(cx).await;
+
+    let diff_base = indoc! {"
+        fn foo() {
+            let a = 1;
+            let b = 2;
+            let c = 3;
+            let d = 4;
+            let e = 5;
+        }
+    "};
+
+    let buffer = indoc! {"
+        ˇfn foo() {
+        }
+    "};
+
+    cx.set_state(&buffer);
+
+    cx.update_editor(|e, _, cx| {
+        e.buffer()
+            .read(cx)
+            .as_singleton()
+            .unwrap()
+            .update(cx, |buffer, cx| {
+                buffer.set_language(Some(rust_lang()), cx);
+            })
+    });
+
+    cx.set_head_text(diff_base);
+    executor.run_until_parked();
+
+    cx.update_editor(|editor, window, cx| {
+        editor.expand_all_diff_hunks(&ExpandAllDiffHunks, window, cx);
+    });
+    executor.run_until_parked();
+
+    // After expanding, the display should look like:
+    //   row 0: fn foo() {
+    //   row 1: -    let a = 1;   (deleted)
+    //   row 2: -    let b = 2;   (deleted)
+    //   row 3: -    let c = 3;   (deleted)
+    //   row 4: -    let d = 4;   (deleted)
+    //   row 5: -    let e = 5;   (deleted)
+    //   row 6: }
+    //
+    // fn foo() spans display rows 0-6. Scrolling into the deleted region
+    // (rows 1-5) should still show fn foo() as a sticky header.
+
+    let fn_foo = Point { row: 0, column: 0 };
+
+    let mut sticky_headers = |offset: ScrollOffset| {
+        cx.update_editor(|e, window, cx| {
+            e.scroll(gpui::Point { x: 0., y: offset }, None, window, cx);
+        });
+        cx.run_until_parked();
+        cx.update_editor(|e, window, cx| {
+            EditorElement::sticky_headers(&e, &e.snapshot(window, cx))
+                .into_iter()
+                .map(
+                    |StickyHeader {
+                         start_point,
+                         offset,
+                         ..
+                     }| { (start_point, offset) },
+                )
+                .collect::<Vec<_>>()
+        })
+    };
+
+    assert_eq!(sticky_headers(0.0), vec![]);
+    assert_eq!(sticky_headers(0.5), vec![(fn_foo, 0.0)]);
+    assert_eq!(sticky_headers(1.0), vec![(fn_foo, 0.0)]);
+    // Scrolling into deleted lines: fn foo() should still be a sticky header.
+    assert_eq!(sticky_headers(2.0), vec![(fn_foo, 0.0)]);
+    assert_eq!(sticky_headers(3.0), vec![(fn_foo, 0.0)]);
+    assert_eq!(sticky_headers(4.0), vec![(fn_foo, 0.0)]);
+    assert_eq!(sticky_headers(5.0), vec![(fn_foo, 0.0)]);
+    assert_eq!(sticky_headers(5.5), vec![(fn_foo, -0.5)]);
+    // Past the closing brace: no more sticky header.
+    assert_eq!(sticky_headers(6.0), vec![]);
 }
 
 #[gpui::test]

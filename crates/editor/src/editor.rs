@@ -114,11 +114,11 @@ use git::blame::{GitBlame, GlobalBlameRenderer};
 use gpui::{
     Action, Animation, AnimationExt, AnyElement, App, AppContext, AsyncWindowContext,
     AvailableSpace, Background, Bounds, ClickEvent, ClipboardEntry, ClipboardItem, Context,
-    DispatchPhase, Edges, Entity, EntityInputHandler, EventEmitter, FocusHandle, FocusOutEvent,
-    Focusable, FontId, FontStyle, FontWeight, Global, HighlightStyle, Hsla, KeyContext, Modifiers,
-    MouseButton, MouseDownEvent, MouseMoveEvent, PaintQuad, ParentElement, Pixels, PressureStage,
-    Render, ScrollHandle, SharedString, SharedUri, Size, Stateful, Styled, Subscription, Task,
-    TextRun, TextStyle, TextStyleRefinement, UTF16Selection, UnderlineStyle,
+    DispatchPhase, Edges, Entity, EntityId, EntityInputHandler, EventEmitter, FocusHandle,
+    FocusOutEvent, Focusable, FontId, FontStyle, FontWeight, Global, HighlightStyle, Hsla,
+    KeyContext, Modifiers, MouseButton, MouseDownEvent, MouseMoveEvent, PaintQuad, ParentElement,
+    Pixels, PressureStage, Render, ScrollHandle, SharedString, SharedUri, Size, Stateful, Styled,
+    Subscription, Task, TextRun, TextStyle, TextStyleRefinement, UTF16Selection, UnderlineStyle,
     UniformListScrollHandle, WeakEntity, WeakFocusHandle, Window, div, point, prelude::*,
     pulsating_between, px, relative, size,
 };
@@ -200,7 +200,7 @@ use std::{
     time::{Duration, Instant},
 };
 use task::{ResolvedTask, RunnableTag, TaskTemplate, TaskVariables};
-use text::{BufferId, FromAnchor, OffsetUtf16, Rope, ToOffset as _};
+use text::{BufferId, FromAnchor, OffsetUtf16, Rope, ToOffset as _, ToPoint as _};
 use theme::{
     AccentColors, ActiveTheme, GlobalTheme, PlayerColor, StatusColors, SyntaxTheme, Theme,
     ThemeSettings, observe_buffer_font_size_adjustment,
@@ -1992,20 +1992,21 @@ impl Editor {
             return;
         }
         let multi_buffer = display_snapshot.buffer_snapshot();
-        let multi_buffer_visible_start = self
+        let scroll_anchor = self
             .scroll_manager
             .native_anchor(display_snapshot, cx)
-            .anchor
-            .to_point(&multi_buffer);
-        let max_row = multi_buffer.max_point().row;
-
-        let start_row = (multi_buffer_visible_start.row).min(max_row);
-        let end_row = (multi_buffer_visible_start.row + 10).min(max_row);
+            .anchor;
         let Some((excerpt_id, _, buffer)) = multi_buffer.as_singleton() else {
             return;
         };
         let buffer = buffer.clone();
         let &excerpt_id = excerpt_id;
+
+        let buffer_visible_start = scroll_anchor.text_anchor.to_point(&buffer);
+        let max_row = buffer.max_point().row;
+        let start_row = buffer_visible_start.row.min(max_row);
+        let end_row = (buffer_visible_start.row + 10).min(max_row);
+
         let syntax = self.style(cx).syntax.clone();
         let background_task = cx.background_spawn(async move {
             buffer
@@ -5356,10 +5357,7 @@ impl Editor {
     pub fn newline_below(&mut self, _: &NewlineBelow, window: &mut Window, cx: &mut Context<Self>) {
         self.hide_mouse_cursor(HideMouseCursorOrigin::TypingAction, cx);
 
-        let buffer = self.buffer.read(cx);
-        let snapshot = buffer.snapshot(cx);
-
-        let mut edits = Vec::new();
+        let mut buffer_edits: HashMap<EntityId, (Entity<Buffer>, Vec<Point>)> = HashMap::default();
         let mut rows = Vec::new();
         let mut rows_inserted = 0;
 
@@ -5367,18 +5365,37 @@ impl Editor {
             let cursor = selection.head();
             let row = cursor.row;
 
-            let point = Point::new(row + 1, 0);
-            let start_of_line = snapshot.clip_point(point, Bias::Left);
+            let point = Point::new(row, 0);
+            let Some((buffer_handle, buffer_point, _)) =
+                self.buffer.read(cx).point_to_buffer_point(point, cx)
+            else {
+                continue;
+            };
 
-            let newline = "\n".to_string();
-            edits.push((start_of_line..start_of_line, newline));
+            buffer_edits
+                .entry(buffer_handle.entity_id())
+                .or_insert_with(|| (buffer_handle, Vec::new()))
+                .1
+                .push(buffer_point);
 
             rows_inserted += 1;
             rows.push(row + rows_inserted);
         }
 
         self.transact(window, cx, |editor, window, cx| {
-            editor.edit(edits, cx);
+            for (_, (buffer_handle, points)) in &buffer_edits {
+                buffer_handle.update(cx, |buffer, cx| {
+                    let edits: Vec<_> = points
+                        .iter()
+                        .map(|point| {
+                            let target = Point::new(point.row + 1, 0);
+                            let start_of_line = buffer.point_to_offset(target).min(buffer.len());
+                            (start_of_line..start_of_line, "\n")
+                        })
+                        .collect();
+                    buffer.edit(edits, None, cx);
+                });
+            }
 
             editor.change_selections(Default::default(), window, cx, |s| {
                 let mut index = 0;
