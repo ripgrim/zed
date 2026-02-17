@@ -64,12 +64,6 @@ impl LinuxClient for HeadlessClient {
         None
     }
 
-    #[cfg(feature = "screen-capture")]
-    fn is_screen_capture_supported(&self) -> bool {
-        false
-    }
-
-    #[cfg(feature = "screen-capture")]
     fn screen_capture_sources(
         &self,
     ) -> futures::channel::oneshot::Receiver<anyhow::Result<Vec<Rc<dyn crate::ScreenCaptureSource>>>>

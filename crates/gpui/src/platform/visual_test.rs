@@ -110,12 +110,10 @@ impl Platform for VisualTestPlatform {
         self.platform.window_stack()
     }
 
-    #[cfg(feature = "screen-capture")]
     fn is_screen_capture_supported(&self) -> bool {
         self.platform.is_screen_capture_supported()
     }
 
-    #[cfg(feature = "screen-capture")]
     fn screen_capture_sources(
         &self,
     ) -> oneshot::Receiver<Result<Vec<Rc<dyn ScreenCaptureSource>>>> {

@@ -269,12 +269,10 @@ impl Platform for TestPlatform {
         Some(self.active_display.clone())
     }
 
-    #[cfg(feature = "screen-capture")]
     fn is_screen_capture_supported(&self) -> bool {
         true
     }
 
-    #[cfg(feature = "screen-capture")]
     fn screen_capture_sources(
         &self,
     ) -> oneshot::Receiver<Result<Vec<Rc<dyn ScreenCaptureSource>>>> {
