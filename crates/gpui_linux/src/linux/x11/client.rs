@@ -813,7 +813,7 @@ impl X11Client {
                         state.xcb_connection.query_pointer(event.window),
                     ) {
                         state.xdnd_state.position =
-                            Point::new(Pixels(pos.win_x as f32), Pixels(pos.win_y as f32));
+                            Point::new(px(pos.win_x as f32), px(pos.win_y as f32));
                     }
                     if !state.xdnd_state.retrieved {
                         check_reply(

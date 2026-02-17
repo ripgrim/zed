@@ -224,7 +224,7 @@ impl<T> PriorityQueueCalloopSender<T> {
         Self { sender: tx, ping }
     }
 
-    fn send(&self, priority: Priority, item: T) -> Result<(), crate::queue::SendError<T>> {
+    fn send(&self, priority: Priority, item: T) -> Result<(), gpui::queue::SendError<T>> {
         let res = self.sender.send(priority, item);
         if res.is_ok() {
             self.ping.ping();

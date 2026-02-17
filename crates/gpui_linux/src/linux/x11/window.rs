@@ -1247,10 +1247,10 @@ impl PlatformWindow for X11Window {
             let [left, right, top, bottom] = state.last_insets;
 
             let [left, right, top, bottom] = [
-                Pixels((left as f32) / state.scale_factor),
-                Pixels((right as f32) / state.scale_factor),
-                Pixels((top as f32) / state.scale_factor),
-                Pixels((bottom as f32) / state.scale_factor),
+                px((left as f32) / state.scale_factor),
+                px((right as f32) / state.scale_factor),
+                px((top as f32) / state.scale_factor),
+                px((bottom as f32) / state.scale_factor),
             ];
 
             bounds.origin.x += left;
