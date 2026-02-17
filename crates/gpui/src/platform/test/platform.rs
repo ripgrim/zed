@@ -15,11 +15,6 @@ use std::{
     rc::{Rc, Weak},
     sync::Arc,
 };
-#[cfg(target_os = "windows")]
-use windows::Win32::{
-    Graphics::Imaging::{CLSID_WICImagingFactory, IWICImagingFactory},
-    System::Com::{CLSCTX_INPROC_SERVER, CoCreateInstance},
-};
 
 /// TestPlatform implements the Platform trait for use in tests.
 pub(crate) struct TestPlatform {
