@@ -77,6 +77,34 @@ pub(crate) struct DevContainer {
     host_requirements: Option<HostRequirements>,
 }
 
+#[derive(Debug, PartialEq, Eq)]
+enum DevContainerBuildType {
+    Image,
+    Dockerfile,
+    DockerCompose,
+    None,
+}
+
+impl DevContainer {
+    fn validate_structure(&self) -> Result<(), RenameMeError> {
+        todo!()
+    }
+    fn validate_features(&self) -> Result<(), RenameMeError> {
+        todo!()
+    }
+
+    fn build_type(&self) -> DevContainerBuildType {
+        if self.image.is_some() {
+            return DevContainerBuildType::Image;
+        } else if self.docker_compose_file.is_some() {
+            return DevContainerBuildType::DockerCompose;
+        } else if self.build.is_some() {
+            return DevContainerBuildType::Dockerfile;
+        }
+        return DevContainerBuildType::None;
+    }
+}
+
 fn deserialize_string_or_array<'de, D>(deserializer: D) -> Result<Option<Vec<String>>, D::Error>
 where
     D: serde::Deserializer<'de>,
@@ -394,6 +422,170 @@ pub(crate) fn read_devcontainer_configuration(
     deserialize_devcontainer_json(&devcontainer_contents)
 }
 
+pub(crate) async fn spawn_dev_container_v2(
+    config: DevContainerConfig,
+    local_project_path: Arc<&Path>,
+) -> Result<DevContainerUp, RenameMeError> {
+    // 1. parse the devcontainer file
+    let config_path = local_project_path.join(config.config_path.clone());
+    log::info!("parsing devcontainer json found in {:?}", &config_path);
+    let devcontainer_contents = std::fs::read_to_string(&config_path).map_err(|e| {
+        log::error!("Unable to read devcontainer contents: {e}");
+        RenameMeError::UnmappedError
+    })?;
+
+    let devcontainer = deserialize_devcontainer_json(&devcontainer_contents)?;
+    // 2. ensure that object is valid
+    devcontainer.validate_structure()?;
+    log::info!("Devcontainer is valid. Proceeding");
+    // 3. check for disallowed features (?)
+    devcontainer.validate_features()?;
+    log::info!("Features defined are valid. Proceeding");
+    // 4. run any initializeCommands
+    log::info!("TODO, run initialze commands");
+
+    let labels = vec![
+        (
+            "devcontainer.local_folder",
+            (&local_project_path.display()).to_string(),
+        ),
+        (
+            "devcontainer.config_file",
+            config.config_path.display().to_string(),
+        ),
+    ];
+
+    // 5. If dockerfile or image config
+    match devcontainer.build_type() {
+        DevContainerBuildType::Image => {
+            log::info!("DevContainer is using an image to build. Checking for existing container");
+            //     1. check for existing container by params + id labels (pending rebuild)
+            if let Some(docker_ps) = check_for_existing_container(labels).await? {
+                log::info!("Dev container already found. Proceeding with it");
+                //     2. If exists and running, return it
+                //
+                let docker_inspect = inspect_running_container(&docker_ps).await?;
+                //     3. If exists and not running, start it
+                log::info!("TODO start the container if it's not running");
+
+                let remote_user = get_remote_user_from_config(&docker_inspect, &devcontainer)?;
+
+                let remote_folder = get_remote_dir_from_config(
+                    &docker_inspect,
+                    (&local_project_path.display()).to_string(),
+                )?;
+
+                return Ok(DevContainerUp {
+                    _outcome: "todo".to_string(),
+                    container_id: docker_ps.id,
+                    remote_user: remote_user,
+                    remote_workspace_folder: remote_folder,
+                });
+            } else {
+                // let docker_build_thing = build_image(&devcontainer).await?;
+                let docker_image_inspect = inspect_image(&devcontainer).await;
+                //     4. If not exists
+                //         1. Build it
+                //         2. Run the built thing you just made
+            }
+        }
+        DevContainerBuildType::Dockerfile => todo!(),
+        DevContainerBuildType::DockerCompose => todo!("Not yet implemented"),
+        DevContainerBuildType::None => todo!(),
+    }
+    // 5. If dockerfile or image config
+    //     1. check for existing container by params + id labels (pending rebuild)
+    //     2. If exists and running, return it
+    //     3. If exists and not running, start it
+    //     4. If not exists
+    //         1. Build it
+    //         2. Run the built thing you just made
+    // 6. If docker-compose config
+    //     1. TODO - this is the next thing
+    Err(RenameMeError::UnmappedError)
+}
+
+async fn inspect_image(devcontainer: &DevContainer) -> Result<DockerInspect, RenameMeError> {
+    let Some(image) = &devcontainer.image else {
+        return Err(RenameMeError::UnmappedError);
+    };
+    let mut command = create_docker_inspect(image)?;
+
+    let output = command.output().await.map_err(|e| {
+        log::error!("Error inspecting docker image: {e}");
+        RenameMeError::UnmappedError
+    })?;
+
+    let Some(docker_inspect): Option<DockerInspect> = deserialize_json_output(output)? else {
+        log::error!("Could not deserialize docker labels");
+        return Err(RenameMeError::UnmappedError);
+    };
+    Ok(docker_inspect)
+}
+
+async fn build_image(dev_container: &DevContainer) -> Result<DockerInspect, RenameMeError> {
+    let mut command = create_docker_build(&dev_container)?;
+
+    let output = command.output().await.map_err(|e| {
+        log::error!("Error building docker image: {e}");
+        RenameMeError::UnmappedError
+    })?;
+
+    // TODO this is probably not the actual thing to return here
+    let Some(docker_inspect): Option<DockerInspect> = deserialize_json_output(output)? else {
+        log::error!("Could not deserialize docker labels");
+        return Err(RenameMeError::UnmappedError);
+    };
+    Ok(docker_inspect)
+}
+
+async fn inspect_running_container(docker_ps: &DockerPs) -> Result<DockerInspect, RenameMeError> {
+    let mut command = create_docker_inspect(&docker_ps.id)?;
+
+    let output = command.output().await.map_err(|e| {
+        log::error!(
+            "Error getting labels from docker image {}: {e}",
+            &docker_ps.id
+        );
+        RenameMeError::UnmappedError
+    })?;
+
+    let Some(docker_inspect): Option<DockerInspect> = deserialize_json_output(output)? else {
+        log::error!("Could not deserialize docker labels");
+        return Err(RenameMeError::UnmappedError);
+    };
+    Ok(docker_inspect)
+}
+
+async fn check_for_existing_container(
+    labels: Vec<(&str, String)>,
+) -> Result<Option<DockerPs>, RenameMeError> {
+    let mut command = create_docker_query_containers(Some(&labels))?;
+
+    let output = command.output().await.map_err(|e| {
+        log::error!("Error executing docker query containers command: {e}");
+        RenameMeError::UnmappedError
+    })?;
+
+    // Execute command, get back ids (or not)
+    let docker_ps: Option<DockerPs> = deserialize_json_output(output)?;
+    Ok(docker_ps)
+}
+
+/// New and improved flow should look like this:
+/// 1. parse the devcontainer file
+/// 2. ensure that object is valid
+/// 3. check for disallowed features (?)
+/// 4. run any initializeCommands
+/// 5. If dockerfile or image config
+///     1. check for existing container by params + id labels (pending rebuild)
+///     2. If exists and running, return it
+///     3. If exists and not running, start it
+///     4. If not exists
+///         1. Build it
+///         2. Run the built thing you just made
+/// 6. If docker-compose config
+///     1. TODO - this is the next thing
 pub(crate) async fn spawn_dev_container(
     config: DevContainerConfig,
     local_project_path: Arc<&Path>,
@@ -435,8 +627,12 @@ pub(crate) async fn spawn_dev_container(
 
     if docker_ps.is_none() {
         log::info!("no docker image found for query, creating one");
-        let mut docker_run_command =
-            create_docker_run_command(&devcontainer, &local_project_path, Some(&labels))?;
+        let mut docker_run_command = create_docker_run_command(
+            &devcontainer,
+            &local_project_path,
+            &DockerConfigLabels { metadata: None },
+            Some(&labels),
+        )?;
 
         if let Err(e) = docker_run_command.output().await {
             log::error!("Error running docker run: {e}");
@@ -516,6 +712,19 @@ fn deserialize_devcontainer_json(json: &str) -> Result<DevContainer, RenameMeErr
     }
 }
 
+fn create_docker_build(devcontainer: &DevContainer) -> Result<Command, RenameMeError> {
+    match devcontainer.build_type() {
+        DevContainerBuildType::Image => {
+            // let's work here
+            let mut command = smol::process::Command::new(docker_cli());
+            Ok(command)
+        }
+        DevContainerBuildType::Dockerfile => todo!(),
+        DevContainerBuildType::DockerCompose => todo!(),
+        DevContainerBuildType::None => todo!(),
+    }
+}
+
 fn create_docker_inspect(id: &str) -> Result<Command, RenameMeError> {
     let mut command = smol::process::Command::new(docker_cli());
     command.args(&["inspect", "--format={{json . }}", id]);
@@ -541,6 +750,7 @@ fn create_docker_query_containers(
 fn create_docker_run_command(
     devcontainer: &DevContainer,
     local_project_directory: &Arc<&Path>,
+    image_labels: &DockerConfigLabels,
     labels: Option<&Vec<(&str, String)>>,
 ) -> Result<Command, RenameMeError> {
     let Some(image) = &devcontainer.image else {
@@ -575,6 +785,18 @@ fn create_docker_run_command(
             command.arg("-l");
             command.arg(format!("{}={}", key, val));
         }
+    }
+
+    if let Some(metadata) = &image_labels.metadata {
+        let serialized_metadata = serde_json_lenient::to_string(metadata).map_err(|e| {
+            log::error!("Problem serializing image metadata: {e}");
+            RenameMeError::UnmappedError
+        })?;
+        command.arg("-l");
+        command.arg(format!(
+            "{}={}",
+            "devcontainer.metadata", serialized_metadata
+        ));
     }
 
     command.arg("--entrypoint");
@@ -644,13 +866,15 @@ mod test {
         sync::Arc,
     };
 
+    use serde_json_lenient::{Value, json};
+
     use crate::model::{
-        ContainerBuild, DevContainer, DockerConfigLabels, DockerInspect, DockerInspectConfig,
-        DockerPs, FeaturePlaceholder, ForwardPort, HostRequirements, LifecycleCommand,
-        LifecyleScript, MountDefinition, OnAutoForward, PortAttributeProtocol, PortAttributes,
-        RenameMeError, ShutdownAction, UserEnvProbe, create_docker_inspect,
-        create_docker_run_command, deserialize_devcontainer_json, deserialize_json_output,
-        get_remote_dir_from_config, get_remote_user_from_config,
+        ContainerBuild, DevContainer, DevContainerBuildType, DockerConfigLabels, DockerInspect,
+        DockerInspectConfig, DockerPs, FeaturePlaceholder, ForwardPort, HostRequirements,
+        LifecycleCommand, LifecyleScript, MountDefinition, OnAutoForward, PortAttributeProtocol,
+        PortAttributes, RenameMeError, ShutdownAction, UserEnvProbe, create_docker_build,
+        create_docker_inspect, create_docker_run_command, deserialize_devcontainer_json,
+        deserialize_json_output, get_remote_dir_from_config, get_remote_user_from_config,
     };
 
     // Tests needed as I come across them
@@ -661,6 +885,9 @@ mod test {
     // - Shutdownaction can only be none or stopContainer in the non-compose case. Can only be none or stopCompose in the compose case
     // - (docker compose) service needs to be an actually defined service in the yml file
     //   - Eh maybe this just becomes a runtime error that we handle appropriately
+    //
+    #[test]
+    fn should_validate_incorrect_shutdown_action_for_devcontainer() {}
     #[test]
     fn should_deserialize_simple_devcontainer_json() {
         let given_bad_json = "{ \"image\": 123 }";
@@ -840,8 +1067,9 @@ mod test {
             deserialize_devcontainer_json(given_image_container_json);
 
         assert!(result.is_ok());
+        let devcontainer = result.expect("ok");
         assert_eq!(
-            result.expect("ok"),
+            devcontainer,
             DevContainer {
                 image: Some(String::from("mcr.microsoft.com/devcontainers/base:ubuntu")),
                 name: Some(String::from("myDevContainer")),
@@ -958,6 +1186,8 @@ mod test {
                 ..Default::default()
             }
         );
+
+        assert_eq!(devcontainer.build_type(), DevContainerBuildType::Image);
     }
 
     #[test]
@@ -1044,8 +1274,9 @@ mod test {
             deserialize_devcontainer_json(given_docker_compose_json);
 
         assert!(result.is_ok());
+        let devcontainer = result.expect("ok");
         assert_eq!(
-            result.expect("ok"),
+            devcontainer,
             DevContainer {
                 name: Some(String::from("myDevContainer")),
                 remote_user: Some(String::from("root")),
@@ -1153,6 +1384,11 @@ mod test {
                 override_command: Some(true),
                 ..Default::default()
             }
+        );
+
+        assert_eq!(
+            devcontainer.build_type(),
+            DevContainerBuildType::DockerCompose
         );
     }
 
@@ -1266,8 +1502,9 @@ mod test {
             deserialize_devcontainer_json(given_dockerfile_container_json);
 
         assert!(result.is_ok());
+        let devcontainer = result.expect("ok");
         assert_eq!(
-            result.expect("ok"),
+            devcontainer,
             DevContainer {
                 name: Some(String::from("myDevContainer")),
                 remote_user: Some(String::from("root")),
@@ -1394,6 +1631,8 @@ mod test {
                 ..Default::default()
             }
         );
+
+        assert_eq!(devcontainer.build_type(), DevContainerBuildType::Dockerfile);
     }
 
     #[test]
@@ -1457,6 +1696,25 @@ mod test {
     }
 
     #[test]
+    fn should_create_correct_docker_build_command() {
+        let given_devcontainer = DevContainer {
+            image: Some("mcr.microsoft.com/devcontainers/base:ubuntu".to_string()),
+            name: Some("DevContainerName".to_string()),
+            remote_user: None,
+            ..Default::default()
+        };
+
+        let docker_build_command = create_docker_build(&given_devcontainer).unwrap();
+
+        assert_eq!(docker_build_command.get_program(), "docker");
+        // So actually this shouldn't create a build command, because there are no features listed here.
+        assert_eq!(
+            docker_build_command.get_args().collect::<Vec<&OsStr>>(),
+            vec![OsStr::new("buildx"), OsStr::new("build"),]
+        )
+    }
+
+    #[test]
     fn should_create_correct_docker_run_command() {
         let mut metadata = HashMap::new();
         metadata.insert(
@@ -1475,9 +1733,42 @@ mod test {
             ("label2", "value2".to_string()),
         ];
 
+        let image_labels = DockerConfigLabels {
+            metadata: Some(vec![
+                HashMap::from([(
+                    "id".to_string(),
+                    Value::String("ghcr.io/devcontainers/features/common-utils:2".to_string()),
+                )]),
+                HashMap::from([
+                    (
+                        "id".to_string(),
+                        Value::String("ghcr.io/devcontainers/features/git:1".to_string()),
+                    ),
+                    (
+                        "customizations".to_string(),
+                        json!(
+                        {
+                            "vscode": {
+                                "settings": {
+                                    "github.copilot.chat.codeGeneration.instructions": [
+                                        { "text": "This dev container includes an up-to-date version of Git, built from source as needed, pre-installed and available on the `PATH`." }
+                                    ]
+                                }
+                            }
+                        }),
+                    ),
+                ]),
+                HashMap::from([(
+                    "remoteUser".to_string(),
+                    Value::String("vscode".to_string()),
+                )]),
+            ]),
+        };
+
         let docker_run_command = create_docker_run_command(
             &given_devcontainer,
             &Arc::new(Path::new("/local/project_app")),
+            &image_labels,
             Some(&labels),
         );
 
@@ -1499,6 +1790,10 @@ mod test {
                 OsStr::new("label1=value1"),
                 OsStr::new("-l"),
                 OsStr::new("label2=value2"),
+                OsStr::new("-l"),
+                OsStr::new(
+                    r#"devcontainer.metadata=[{"id":"ghcr.io/devcontainers/features/common-utils:2"},{"id":"ghcr.io/devcontainers/features/git:1","customizations":{"vscode":{"settings":{"github.copilot.chat.codeGeneration.instructions":[{"text":"This dev container includes an up-to-date version of Git, built from source as needed, pre-installed and available on the `PATH`."}]}}}},{"remoteUser":"vscode"}]"#
+                ),
                 OsStr::new("--entrypoint"),
                 OsStr::new("/bin/sh"),
                 OsStr::new("mcr.microsoft.com/devcontainers/base:ubuntu"),
