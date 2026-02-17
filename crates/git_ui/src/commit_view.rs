@@ -2,8 +2,8 @@ use anyhow::{Context as _, Result};
 use buffer_diff::BufferDiff;
 use collections::HashMap;
 use editor::{
-    Addon, Editor, EditorEvent, MultiBuffer, SelectionEffects, multibuffer_context_lines,
-    scroll::Autoscroll,
+    Addon, Editor, EditorEvent, EditorSettings, MultiBuffer, SelectionEffects, SplittableEditor,
+    multibuffer_context_lines, scroll::Autoscroll,
 };
 use git::repository::{CommitDetails, CommitDiff, RepoPath, is_binary_content};
 use git::status::{FileStatus, StatusCode, TrackedStatus};
@@ -19,6 +19,7 @@ use language::{
 };
 use multi_buffer::PathKey;
 use project::{Project, WorktreeId, git_store::Repository};
+use settings::Settings;
 use std::{
     any::{Any, TypeId},
     collections::HashSet,
@@ -74,10 +75,11 @@ pub fn init(cx: &mut App) {
 
 pub struct CommitView {
     commit: CommitDetails,
-    editor: Entity<Editor>,
+    editor: Entity<SplittableEditor>,
     stash: Option<usize>,
     multibuffer: Entity<MultiBuffer>,
     repository: Entity<Repository>,
+    workspace: WeakEntity<Workspace>,
     remote: Option<GitRemote>,
     changed_files: Vec<(RepoPath, FileStatus)>,
     show_details_sidebar: bool,
@@ -144,12 +146,14 @@ impl CommitView {
                 workspace
                     .update_in(cx, |workspace, window, cx| {
                         let project = workspace.project();
+                        let workspace_handle = cx.entity();
                         let commit_view = cx.new(|cx| {
                             CommitView::new(
                                 commit_details,
                                 commit_diff,
                                 repo,
                                 project.clone(),
+                                workspace_handle,
                                 stash,
                                 window,
                                 cx,
@@ -180,6 +184,7 @@ impl CommitView {
         commit_diff: CommitDiff,
         repository: Entity<Repository>,
         project: Entity<Project>,
+        workspace: Entity<Workspace>,
         stash: Option<usize>,
         window: &mut Window,
         cx: &mut Context<Self>,
@@ -211,14 +216,19 @@ impl CommitView {
             .collect();
 
         let editor = cx.new(|cx| {
-            let mut editor =
-                Editor::for_multibuffer(multibuffer.clone(), Some(project.clone()), window, cx);
-
-            editor.disable_inline_diagnostics();
-            editor.set_show_breakpoints(false, cx);
-            editor.set_show_diff_review_button(true, cx);
-            editor.set_expand_all_diff_hunks(cx);
-
+            let editor = SplittableEditor::new(
+                EditorSettings::get_global(cx).diff_view_style,
+                multibuffer.clone(),
+                project.clone(),
+                workspace.clone(),
+                window,
+                cx,
+            );
+            editor.rhs_editor().update(cx, |editor, cx| {
+                editor.disable_inline_diagnostics();
+                editor.set_show_breakpoints(false, cx);
+                editor.set_show_diff_review_button(true, cx);
+            });
             editor
         });
 
@@ -253,7 +263,11 @@ impl CommitView {
                 } else {
                     raw_new_text
                 };
-                let old_text = if is_binary { None } else { raw_old_text };
+                let old_text = if is_binary {
+                    Some(new_text.clone())
+                } else {
+                    raw_old_text
+                };
                 let worktree_id = repository_clone
                     .update(cx, |repository, cx| {
                         repository
@@ -300,53 +314,48 @@ impl CommitView {
                     binary_buffer_ids.insert(buffer_id);
                 }
 
-                let buffer_diff = if is_binary {
-                    None
-                } else {
-                    Some(build_buffer_diff(old_text, &buffer, &language_registry, cx).await?)
-                };
+                let buffer_diff =
+                    build_buffer_diff(old_text, &buffer, &language_registry, cx).await?;
 
                 this.update(cx, |this, cx| {
-                    this.multibuffer.update(cx, |multibuffer, cx| {
-                        let snapshot = buffer.read(cx).snapshot();
-                        let path = snapshot.file().unwrap().path().clone();
-                        let excerpt_ranges = if is_binary {
-                            vec![language::Point::zero()..snapshot.max_point()]
-                        } else if let Some(buffer_diff) = &buffer_diff {
-                            let diff_snapshot = buffer_diff.read(cx).snapshot(cx);
-                            let mut hunks = diff_snapshot.hunks(&snapshot).peekable();
-                            if hunks.peek().is_none() {
-                                vec![language::Point::zero()..snapshot.max_point()]
-                            } else {
-                                hunks
-                                    .map(|hunk| hunk.buffer_range.to_point(&snapshot))
-                                    .collect::<Vec<_>>()
-                            }
-                        } else {
-                            vec![language::Point::zero()..snapshot.max_point()]
-                        };
+                    let snapshot = buffer.read(cx).snapshot();
+                    let path = snapshot.file().unwrap().path().clone();
+                    let path_key = PathKey::with_sort_prefix(FILE_NAMESPACE_SORT_PREFIX, path);
 
-                        let _is_newly_added = multibuffer.set_excerpts_for_path(
-                            PathKey::with_sort_prefix(FILE_NAMESPACE_SORT_PREFIX, path),
+                    let diff_snapshot = buffer_diff.read(cx).snapshot(cx);
+                    let mut hunks = diff_snapshot.hunks(&snapshot).peekable();
+                    let excerpt_ranges = if hunks.peek().is_none() {
+                        vec![language::Point::zero()..snapshot.max_point()]
+                    } else {
+                        hunks
+                            .map(|hunk| hunk.buffer_range.to_point(&snapshot))
+                            .collect::<Vec<_>>()
+                    };
+
+                    this.editor.update(cx, |editor, cx| {
+                        editor.set_excerpts_for_path(
+                            path_key,
                             buffer,
                             excerpt_ranges,
                             multibuffer_context_lines(cx),
+                            buffer_diff,
                             cx,
                         );
-                        if let Some(buffer_diff) = buffer_diff {
-                            multibuffer.add_diff(buffer_diff, cx);
-                        }
                     });
                 })?;
             }
 
             this.update(cx, |this, cx| {
-                this.editor.update(cx, |editor, _cx| {
-                    editor.register_addon(CommitDiffAddon { file_statuses });
+                this.editor.update(cx, |editor, cx| {
+                    editor.rhs_editor().update(cx, |rhs_editor, _cx| {
+                        rhs_editor.register_addon(CommitDiffAddon { file_statuses });
+                    });
                 });
                 if !binary_buffer_ids.is_empty() {
                     this.editor.update(cx, |editor, cx| {
-                        editor.fold_buffers(binary_buffer_ids, cx);
+                        editor.rhs_editor().update(cx, |rhs_editor, cx| {
+                            rhs_editor.fold_buffers(binary_buffer_ids, cx);
+                        });
                     });
                 }
             })?;
@@ -376,6 +385,7 @@ impl CommitView {
             multibuffer,
             stash,
             repository,
+            workspace: workspace.downgrade(),
             remote,
             changed_files,
             show_details_sidebar: false,
@@ -728,19 +738,24 @@ impl Item for CommitView {
     }
 
     fn deactivated(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        self.editor
-            .update(cx, |editor, cx| editor.deactivated(window, cx));
+        self.editor.update(cx, |editor, cx| {
+            editor
+                .rhs_editor()
+                .update(cx, |rhs_editor, cx| rhs_editor.deactivated(window, cx));
+        });
     }
 
     fn act_as_type<'a>(
         &'a self,
         type_id: TypeId,
         self_handle: &'a Entity<Self>,
-        _: &'a App,
+        cx: &'a App,
     ) -> Option<gpui::AnyEntity> {
         if type_id == TypeId::of::<Self>() {
             Some(self_handle.clone().into())
         } else if type_id == TypeId::of::<Editor>() {
+            Some(self.editor.read(cx).rhs_editor().clone().into())
+        } else if type_id == TypeId::of::<SplittableEditor>() {
             Some(self.editor.clone().into())
         } else {
             None
@@ -756,7 +771,11 @@ impl Item for CommitView {
         cx: &App,
         f: &mut dyn FnMut(gpui::EntityId, &dyn project::ProjectItem),
     ) {
-        self.editor.for_each_project_item(cx, f)
+        self.editor
+            .read(cx)
+            .rhs_editor()
+            .read(cx)
+            .for_each_project_item(cx, f)
     }
 
     fn set_nav_history(
@@ -765,8 +784,10 @@ impl Item for CommitView {
         _: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.editor.update(cx, |editor, _| {
-            editor.set_nav_history(Some(nav_history));
+        self.editor.update(cx, |editor, cx| {
+            editor.rhs_editor().update(cx, |rhs_editor, _| {
+                rhs_editor.set_nav_history(Some(nav_history));
+            });
         });
     }
 
@@ -776,8 +797,11 @@ impl Item for CommitView {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> bool {
-        self.editor
-            .update(cx, |editor, cx| editor.navigate(data, window, cx))
+        self.editor.update(cx, |editor, cx| {
+            editor
+                .rhs_editor()
+                .update(cx, |rhs_editor, cx| rhs_editor.navigate(data, window, cx))
+        })
     }
 
     fn added_to_workspace(
@@ -804,8 +828,13 @@ impl Item for CommitView {
     where
         Self: Sized,
     {
+        let Some(workspace) = self.workspace.upgrade() else {
+            return Task::ready(None);
+        };
         let file_statuses = self
             .editor
+            .read(cx)
+            .rhs_editor()
             .read(cx)
             .addon::<CommitDiffAddon>()
             .map(|addon| addon.file_statuses.clone())
@@ -813,21 +842,30 @@ impl Item for CommitView {
         Task::ready(Some(cx.new(|cx| {
             let editor = cx.new({
                 let file_statuses = file_statuses.clone();
+                let workspace = workspace.clone();
                 |cx| {
-                    let mut editor = self
-                        .editor
-                        .update(cx, |editor, cx| editor.clone(window, cx));
-                    editor.register_addon(CommitDiffAddon { file_statuses });
+                    let editor = SplittableEditor::new(
+                        EditorSettings::get_global(cx).diff_view_style,
+                        self.multibuffer.clone(),
+                        workspace.read(cx).project().clone(),
+                        workspace,
+                        window,
+                        cx,
+                    );
+                    editor.rhs_editor().update(cx, |rhs_editor, _cx| {
+                        rhs_editor.register_addon(CommitDiffAddon { file_statuses });
+                    });
                     editor
                 }
             });
-            let multibuffer = editor.read(cx).buffer().clone();
+            let multibuffer = self.multibuffer.clone();
             Self {
                 editor,
                 multibuffer,
                 commit: self.commit.clone(),
                 stash: self.stash,
                 repository: self.repository.clone(),
+                workspace: self.workspace.clone(),
                 remote: self.remote.clone(),
                 changed_files: self.changed_files.clone(),
                 show_details_sidebar: self.show_details_sidebar,
@@ -876,14 +914,16 @@ impl Render for CommitView {
                     );
                     if let Some(position) = multibuffer.read(cx).location_for_path(&path_key, cx) {
                         editor.update(cx, |editor, cx| {
-                            editor.change_selections(
-                                SelectionEffects::scroll(Autoscroll::focused()),
-                                window,
-                                cx,
-                                |s| {
-                                    s.select_ranges([position..position]);
-                                },
-                            );
+                            editor.rhs_editor().update(cx, |rhs_editor, cx| {
+                                rhs_editor.change_selections(
+                                    SelectionEffects::scroll(Autoscroll::focused()),
+                                    window,
+                                    cx,
+                                    |s| {
+                                        s.select_ranges([position..position]);
+                                    },
+                                );
+                            });
                         });
                     }
                 })
@@ -894,7 +934,7 @@ impl Render for CommitView {
             .key_context(if is_stash { "StashDiff" } else { "CommitDiff" })
             .size_full()
             .bg(cx.theme().colors().editor_background)
-            .when(!self.editor.read(cx).is_empty(cx), |this| {
+            .when(!self.multibuffer.read(cx).is_empty(), |this| {
                 this.child(
                     div()
                         .flex_1()
