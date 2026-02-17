@@ -53,9 +53,6 @@ pub(crate) use text_system::*;
 
 pub use platform::MacPlatform;
 
-/// A frame of video captured from a screen.
-pub type PlatformScreenCaptureFrame = CVImageBuffer;
-
 trait BoolExt {
     fn to_objc(self) -> BOOL;
 }

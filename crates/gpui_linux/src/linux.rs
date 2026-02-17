@@ -23,11 +23,6 @@ pub use wayland::*;
 #[cfg(feature = "x11")]
 pub use x11::*;
 
-#[cfg(all(feature = "screen-capture", any(feature = "wayland", feature = "x11")))]
-pub type PlatformScreenCaptureFrame = scap::frame::Frame;
-#[cfg(not(all(feature = "screen-capture", any(feature = "wayland", feature = "x11"))))]
-pub type PlatformScreenCaptureFrame = ();
-
 use std::rc::Rc;
 
 /// Returns the default platform implementation for the current OS.
