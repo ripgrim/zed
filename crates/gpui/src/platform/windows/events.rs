@@ -904,7 +904,8 @@ impl WindowsWindowInner {
                 click_count,
                 first_mouse: false,
             });
-            let handled = !func(input).propagate;
+            let result = func(input);
+            let handled = !result.propagate || result.default_prevented;
             self.state.callbacks.input.set(Some(func));
 
             if handled {
