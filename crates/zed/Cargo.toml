@@ -120,7 +120,7 @@ gpui = { workspace = true, features = [
     "wayland",
     "x11",
 ] }
-gpui_platform = {workspace = true, features=["screen-capture", "font-kit"]}
+gpui_platform = {workspace = true, features=["screen-capture", "font-kit", "wayland", "x11"]}
 image = { workspace = true, optional = true }
 semver = { workspace = true, optional = true }
 tempfile = { workspace = true, optional = true }

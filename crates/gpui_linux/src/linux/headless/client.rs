@@ -4,11 +4,10 @@ use std::rc::Rc;
 use calloop::{EventLoop, LoopHandle};
 use util::ResultExt;
 
-use crate::platform::linux::LinuxClient;
-use crate::platform::{LinuxCommon, PlatformWindow};
+use crate::linux::LinuxClient;
 use crate::{
-    AnyWindowHandle, CursorStyle, DisplayId, LinuxKeyboardLayout, PlatformDisplay,
-    PlatformKeyboardLayout, WindowParams,
+    AnyWindowHandle, CursorStyle, DisplayId, LinuxCommon, LinuxKeyboardLayout, PlatformDisplay,
+    PlatformKeyboardLayout, PlatformWindow, WindowParams,
 };
 
 pub struct HeadlessClientState {

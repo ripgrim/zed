@@ -1,5 +1,5 @@
 use crate::Globals;
-use crate::platform::linux::{DEFAULT_CURSOR_ICON_NAME, log_cursor_icon_warning};
+use crate::linux::{DEFAULT_CURSOR_ICON_NAME, log_cursor_icon_warning};
 use anyhow::{Context as _, anyhow};
 use util::ResultExt;
 

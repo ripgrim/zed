@@ -2,17 +2,11 @@ mod app_menu;
 mod keyboard;
 mod keystroke;
 
-#[cfg(any(target_os = "linux", target_os = "freebsd"))]
-mod linux;
+#[cfg(all(target_os = "linux", feature = "wayland"))]
+pub mod layer_shell;
 
 #[cfg(target_os = "macos")]
 mod mac;
-
-#[cfg(all(
-    any(target_os = "linux", target_os = "freebsd"),
-    any(feature = "wayland", feature = "x11")
-))]
-mod wgpu;
 
 #[cfg(any(test, feature = "test-support"))]
 mod test;
@@ -71,15 +65,10 @@ pub use app_menu::*;
 pub use keyboard::*;
 pub use keystroke::*;
 
-#[cfg(any(target_os = "linux", target_os = "freebsd"))]
-pub(crate) use linux::*;
 #[cfg(target_os = "macos")]
 pub(crate) use mac::*;
 #[cfg(any(test, feature = "test-support"))]
 pub(crate) use test::*;
-
-#[cfg(all(target_os = "linux", feature = "wayland"))]
-pub use linux::layer_shell;
 
 #[cfg(any(test, feature = "test-support"))]
 pub use test::{TestDispatcher, TestScreenCaptureSource, TestScreenCaptureStream};
@@ -87,34 +76,8 @@ pub use test::{TestDispatcher, TestScreenCaptureSource, TestScreenCaptureStream}
 #[cfg(all(target_os = "macos", any(test, feature = "test-support")))]
 pub use visual_test::VisualTestPlatform;
 
-#[cfg(any(target_os = "linux", target_os = "freebsd"))]
-/// Returns the default platform implementation for the current OS.
-pub fn current_platform(headless: bool) -> Rc<dyn Platform> {
-    #[cfg(feature = "x11")]
-    use anyhow::Context as _;
-
-    if headless {
-        return Rc::new(HeadlessClient::new());
-    }
-
-    match guess_compositor() {
-        #[cfg(feature = "wayland")]
-        "Wayland" => Rc::new(WaylandClient::new()),
-
-        #[cfg(feature = "x11")]
-        "X11" => Rc::new(
-            X11Client::new()
-                .context("Failed to initialize X11 client.")
-                .unwrap(),
-        ),
-
-        "Headless" => Rc::new(HeadlessClient::new()),
-        _ => unreachable!(),
-    }
-}
-
 /// Return which compositor we're guessing we'll use.
-/// Does not attempt to connect to the given compositor
+/// Does not attempt to connect to the given compositor.
 #[cfg(any(target_os = "linux", target_os = "freebsd"))]
 #[inline]
 pub fn guess_compositor() -> &'static str {

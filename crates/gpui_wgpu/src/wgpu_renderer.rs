@@ -1,10 +1,10 @@
-use super::{WgpuAtlas, WgpuContext};
-use crate::{
+use crate::{WgpuAtlas, WgpuContext};
+use bytemuck::{Pod, Zeroable};
+use gpui::{
     AtlasTextureId, Background, Bounds, DevicePixels, GpuSpecs, MonochromeSprite, Path, Point,
     PolychromeSprite, PrimitiveBatch, Quad, ScaledPixels, Scene, Shadow, Size, SubpixelSprite,
     Underline, get_gamma_correction_ratios,
 };
-use bytemuck::{Pod, Zeroable};
 use raw_window_handle::{HasDisplayHandle, HasWindowHandle};
 use std::num::NonZeroU64;
 use std::sync::Arc;

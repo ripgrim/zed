@@ -35,7 +35,7 @@ pub fn current_platform(headless: bool) -> Rc<dyn Platform> {
 
     #[cfg(not(any(target_os = "macos", target_os = "windows")))]
     {
-        gpui::current_platform(headless)
+        gpui_linux::current_platform(headless)
     }
 }
 

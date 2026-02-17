@@ -48,23 +48,21 @@ use super::{
     pressed_button_from_mask,
 };
 
-use crate::platform::{
-    LinuxCommon, PlatformWindow,
-    linux::{
-        DEFAULT_CURSOR_ICON_NAME, LinuxClient, get_xkb_compose_state, is_within_click_distance,
-        log_cursor_icon_warning, open_uri_internal,
-        platform::{DOUBLE_CLICK_INTERVAL, SCROLL_LINES},
-        reveal_path_internal,
-        xdg_desktop_portal::{Event as XDPEvent, XDPEventSource},
-    },
-    wgpu::WgpuContext,
+use crate::linux::{
+    DEFAULT_CURSOR_ICON_NAME, LinuxClient, get_xkb_compose_state, is_within_click_distance,
+    log_cursor_icon_warning, open_uri_internal,
+    platform::{DOUBLE_CLICK_INTERVAL, SCROLL_LINES},
+    reveal_path_internal,
+    xdg_desktop_portal::{Event as XDPEvent, XDPEventSource},
 };
 use crate::{
     AnyWindowHandle, Bounds, ClipboardItem, CursorStyle, DisplayId, FileDropEvent, Keystroke,
-    LinuxKeyboardLayout, Modifiers, ModifiersChangedEvent, MouseButton, Pixels, Platform,
-    PlatformDisplay, PlatformInput, PlatformKeyboardLayout, Point, RequestFrameOptions,
-    ScrollDelta, Size, TouchPhase, WindowParams, X11Window, modifiers_from_xinput_info, point, px,
+    LinuxCommon, LinuxKeyboardLayout, Modifiers, ModifiersChangedEvent, MouseButton, Pixels,
+    Platform, PlatformDisplay, PlatformInput, PlatformKeyboardLayout, PlatformWindow, Point,
+    RequestFrameOptions, ScrollDelta, Size, TouchPhase, WindowParams, X11Window,
+    modifiers_from_xinput_info, point, px,
 };
+use gpui_wgpu::WgpuContext;
 
 /// Value for DeviceId parameters which selects all devices.
 pub(crate) const XINPUT_ALL_DEVICES: xinput::DeviceId = 0;
@@ -1487,9 +1485,7 @@ impl LinuxClient for X11Client {
         &self,
     ) -> futures::channel::oneshot::Receiver<anyhow::Result<Vec<Rc<dyn crate::ScreenCaptureSource>>>>
     {
-        crate::platform::scap_screen_capture::scap_screen_sources(
-            &self.0.borrow().common.foreground_executor,
-        )
+        gpui::scap_screen_capture::scap_screen_sources(&self.0.borrow().common.foreground_executor)
     }
 
     fn open_window(
@@ -2282,7 +2278,7 @@ fn make_scroll_wheel_event(
 
 fn create_invisible_cursor(
     connection: &XCBConnection,
-) -> anyhow::Result<crate::platform::linux::x11::client::xproto::Cursor> {
+) -> anyhow::Result<crate::linux::x11::client::xproto::Cursor> {
     let empty_pixmap = connection.generate_id()?;
     let root = connection.setup().roots[0].root;
     connection.create_pixmap(1, empty_pixmap, root, 1, 1)?;

@@ -421,11 +421,11 @@ mod tests {
 }
 
 // running 1 test
-// test platform::linux::dispatcher::tests::tomato ... FAILED
+// test linux::dispatcher::tests::tomato ... FAILED
 
 // failures:
 
-// ---- platform::linux::dispatcher::tests::tomato stdout ----
+// ---- linux::dispatcher::tests::tomato stdout ----
 // [crates/gpui/src/platform/linux/dispatcher.rs:262:9]
 // returning 1 tasks to process
 // [crates/gpui/src/platform/linux/dispatcher.rs:480:75] evt = Msg(
@@ -433,6 +433,6 @@ mod tests {
 // )
 // returning 0 tasks to process
 
-// thread 'platform::linux::dispatcher::tests::tomato' (478301) panicked at crates/gpui/src/platform/linux/dispatcher.rs:515:9:
+// thread 'linux::dispatcher::tests::tomato' (478301) panicked at crates/gpui/src/platform/linux/dispatcher.rs:515:9:
 // assertion failed: data.got_closed
 // note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace

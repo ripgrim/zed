@@ -81,9 +81,10 @@ use crate::{
     PlatformInput, PlatformKeyboardLayout, Point, ResultExt as _, SCROLL_LINES, ScrollDelta,
     ScrollWheelEvent, Size, TouchPhase, WindowParams, point, profiler, px, size,
 };
+use crate::{PlatformWindow, TaskTiming};
 use crate::{
     SharedString,
-    platform::linux::{
+    linux::{
         LinuxClient, get_xkb_compose_state, is_within_click_distance, open_uri_internal, read_fd,
         reveal_path_internal,
         wayland::{
@@ -95,10 +96,7 @@ use crate::{
         xdg_desktop_portal::{Event as XDPEvent, XDPEventSource},
     },
 };
-use crate::{
-    TaskTiming,
-    platform::{PlatformWindow, wgpu::WgpuContext},
-};
+use gpui_wgpu::WgpuContext;
 
 /// Used to convert evdev scancode to xkb scancode
 const MIN_KEYCODE: u32 = 8;

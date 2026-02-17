@@ -7378,16 +7378,11 @@ name = "gpui"
 version = "0.2.2"
 dependencies = [
  "anyhow",
- "as-raw-xcb-connection",
- "ashpd",
  "async-task",
  "backtrace",
  "bindgen 0.71.1",
  "bitflags 2.10.0",
  "block",
- "bytemuck",
- "calloop",
- "calloop-wayland-source",
  "cbindgen",
  "chrono",
  "circular-buffer",
@@ -7399,12 +7394,10 @@ dependencies = [
  "core-graphics 0.24.0",
  "core-text",
  "core-video",
- "cosmic-text",
  "ctor",
  "derive_more 0.99.20",
  "env_logger 0.11.8",
  "etagere",
- "filedescriptor",
  "foreign-types 0.5.0",
  "futures 0.3.31",
  "gpui_macros",
@@ -7413,7 +7406,6 @@ dependencies = [
  "image",
  "inventory",
  "itertools 0.14.0",
- "libc",
  "log",
  "lyon",
  "mach2 0.5.0",
@@ -7424,8 +7416,6 @@ dependencies = [
  "objc",
  "objc2",
  "objc2-metal",
- "oo7",
- "open",
  "parking",
  "parking_lot",
  "pathfinder_geometry",
@@ -7450,7 +7440,6 @@ dependencies = [
  "stacksafe",
  "strum 0.27.2",
  "sum_tree",
- "swash",
  "taffy",
  "thiserror 2.0.17",
  "unicode-segmentation",
@@ -7459,14 +7448,45 @@ dependencies = [
  "util_macros",
  "uuid",
  "waker-fn",
+ "windows 0.61.3",
+ "zed-font-kit",
+ "zed-scap",
+]
+
+[[package]]
+name = "gpui_linux"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "as-raw-xcb-connection",
+ "ashpd",
+ "bitflags 2.10.0",
+ "calloop",
+ "calloop-wayland-source",
+ "collections",
+ "cosmic-text",
+ "filedescriptor",
+ "gpui",
+ "gpui_wgpu",
+ "http_client",
+ "libc",
+ "log",
+ "oo7",
+ "open",
+ "parking_lot",
+ "profiling",
+ "raw-window-handle",
+ "smallvec",
+ "smol",
+ "swash",
+ "util",
+ "uuid",
  "wayland-backend",
  "wayland-client",
  "wayland-cursor",
  "wayland-protocols",
  "wayland-protocols-plasma",
  "wayland-protocols-wlr",
- "wgpu",
- "windows 0.61.3",
  "x11-clipboard",
  "x11rb",
  "xkbcommon",
@@ -7532,6 +7552,7 @@ name = "gpui_platform"
 version = "0.1.0"
 dependencies = [
  "gpui",
+ "gpui_linux",
  "gpui_macos",
  "gpui_windows",
 ]
@@ -7544,6 +7565,24 @@ dependencies = [
  "gpui",
  "tokio",
  "util",
+]
+
+[[package]]
+name = "gpui_wgpu"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "bytemuck",
+ "collections",
+ "etagere",
+ "gpui",
+ "log",
+ "parking_lot",
+ "profiling",
+ "raw-window-handle",
+ "smol",
+ "util",
+ "wgpu",
 ]
 
 [[package]]

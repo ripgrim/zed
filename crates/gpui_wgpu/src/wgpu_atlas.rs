@@ -1,10 +1,10 @@
-use crate::{
-    AtlasKey, AtlasTextureId, AtlasTextureKind, AtlasTile, Bounds, DevicePixels, PlatformAtlas,
-    Point, Size, platform::AtlasTextureList,
-};
 use anyhow::Result;
 use collections::FxHashMap;
 use etagere::{BucketedAtlasAllocator, size2};
+use gpui::{
+    AtlasKey, AtlasTextureId, AtlasTextureKind, AtlasTextureList, AtlasTile, Bounds, DevicePixels,
+    PlatformAtlas, Point, Size,
+};
 use parking_lot::Mutex;
 use std::{borrow::Cow, ops, sync::Arc};
 
@@ -19,7 +19,7 @@ fn etagere_point_to_device(point: etagere::Point) -> Point<DevicePixels> {
     }
 }
 
-pub(crate) struct WgpuAtlas(Mutex<WgpuAtlasState>);
+pub struct WgpuAtlas(Mutex<WgpuAtlasState>);
 
 struct PendingUpload {
     id: AtlasTextureId,
@@ -40,7 +40,7 @@ pub struct WgpuTextureInfo {
 }
 
 impl WgpuAtlas {
-    pub(crate) fn new(device: Arc<wgpu::Device>, queue: Arc<wgpu::Queue>) -> Self {
+    pub fn new(device: Arc<wgpu::Device>, queue: Arc<wgpu::Queue>) -> Self {
         WgpuAtlas(Mutex::new(WgpuAtlasState {
             device,
             queue,

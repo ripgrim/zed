@@ -2969,7 +2969,7 @@ impl From<usize> for DevicePixels {
 /// display resolutions.
 #[derive(Clone, Copy, Default, Add, AddAssign, Sub, SubAssign, Div, DivAssign, PartialEq)]
 #[repr(transparent)]
-pub struct ScaledPixels(pub(crate) f32);
+pub struct ScaledPixels(pub f32);
 
 impl ScaledPixels {
     /// Returns the raw `f32` value of this `ScaledPixels`.

@@ -12,7 +12,7 @@ use wayland_protocols::wp::primary_selection::zv1::client::zwp_primary_selection
 
 use crate::{
     ClipboardEntry, ClipboardItem, Image, ImageFormat, WaylandClientStatePtr, hash,
-    platform::linux::platform::read_fd,
+    linux::platform::read_fd,
 };
 
 /// Text mime types that we'll offer to other programs.

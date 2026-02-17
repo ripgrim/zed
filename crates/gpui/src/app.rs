@@ -132,41 +132,10 @@ pub struct Application(Rc<AppCell>);
 /// Represents an application before it is fully launched. Once your app is
 /// configured, you'll start the app with `App::run`.
 impl Application {
-    /// Builds an app using the default platform for the current OS.
-    ///
-    /// On Windows, use [`Application::with_platform`] instead — the Windows
-    /// platform lives in the `gpui_windows` crate.
-    #[cfg(not(any(target_os = "windows", target_os = "macos")))]
-    #[allow(clippy::new_without_default)]
-    pub fn new() -> Self {
-        #[cfg(any(test, feature = "test-support"))]
-        log::info!("GPUI was compiled in test mode");
-
-        Self(App::new_app(
-            crate::current_platform(false),
-            Arc::new(()),
-            Arc::new(NullHttpClient),
-        ))
-    }
-
     /// Builds an app with a caller-provided platform implementation.
     pub fn with_platform(platform: Rc<dyn Platform>) -> Self {
         Self(App::new_app(
             platform,
-            Arc::new(()),
-            Arc::new(NullHttpClient),
-        ))
-    }
-
-    /// Build an app in headless mode. This prevents opening windows,
-    /// but makes it possible to run an application in an context like
-    /// SSH, where GUI applications are not allowed.
-    ///
-    /// On Windows, use [`Application::with_platform`] instead.
-    #[cfg(not(any(target_os = "windows", target_os = "macos")))]
-    pub fn headless() -> Self {
-        Self(App::new_app(
-            crate::current_platform(true),
             Arc::new(()),
             Arc::new(NullHttpClient),
         ))
