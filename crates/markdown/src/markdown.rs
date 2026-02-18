@@ -35,12 +35,67 @@ use language::{CharClassifier, Language, LanguageRegistry, Rope};
 use parser::CodeBlockMetadata;
 use parser::{MarkdownEvent, MarkdownTag, MarkdownTagEnd, parse_links_only, parse_markdown};
 use pulldown_cmark::Alignment;
+
 use sum_tree::TreeMap;
 use theme::SyntaxTheme;
 use ui::{ScrollAxes, Scrollbars, WithScrollbar, prelude::*};
 use util::ResultExt;
 
 use crate::parser::CodeBlockKind;
+
+/// Returns the number of leading whitespace characters common to all non-empty
+/// lines in `text`.
+fn common_indent_len(text: &str) -> usize {
+    text.lines()
+        .filter(|line| !line.trim().is_empty())
+        .map(|line| line.len() - line.trim_start().len())
+        .min()
+        .unwrap_or(0)
+}
+
+/// Strips the common leading whitespace from all non-empty lines in `text`.
+fn strip_common_indent(text: &str) -> String {
+    let indent = common_indent_len(text);
+    if indent == 0 {
+        return text.to_string();
+    }
+    text.lines()
+        .map(|line| {
+            if line.len() >= indent {
+                &line[indent..]
+            } else {
+                line
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+/// Maps a byte offset in the original text to the corresponding byte offset
+/// in the dedented text (where `indent` leading bytes have been stripped per
+/// line). If the offset falls within the stripped indent region of a line, it
+/// is clamped to the start of that dedented line.
+fn map_to_dedented_offset(original_text: &str, indent: usize, offset: usize) -> usize {
+    let mut original_pos = 0;
+    let mut dedented_pos = 0;
+
+    for line in original_text.split('\n') {
+        if original_pos + line.len() >= offset {
+            let pos_in_line = offset - original_pos;
+            let skip = indent.min(line.len());
+            if pos_in_line <= skip {
+                return dedented_pos;
+            } else {
+                return dedented_pos + pos_in_line - skip;
+            }
+        }
+        let skip = indent.min(line.len());
+        dedented_pos += line.len() - skip + 1; // +1 for the \n
+        original_pos += line.len() + 1;
+    }
+
+    dedented_pos
+}
 
 /// A callback function that can be used to customize the style of links based on the destination URL.
 /// If the callback returns `None`, the default link style will be used.
@@ -428,7 +483,7 @@ impl Markdown {
         if self.selection.end <= self.selection.start {
             None
         } else {
-            Some(self.source[self.selection.start..self.selection.end].to_string())
+            Some(self.source_with_dedented_code_blocks(self.selection.start..self.selection.end))
         }
     }
 
@@ -448,12 +503,78 @@ impl Markdown {
         if self.selection.end <= self.selection.start {
             return;
         }
-        let text = self.source[self.selection.start..self.selection.end].to_string();
+        let text = self.source_with_dedented_code_blocks(self.selection.start..self.selection.end);
         cx.write_to_clipboard(ClipboardItem::new_string(text));
     }
 
     fn capture_selection_for_context_menu(&mut self) {
         self.context_menu_selected_text = self.selected_text();
+    }
+
+    /// Returns the source text for the given range, but with the content of
+    /// any fenced code blocks dedented (common leading whitespace stripped).
+    fn source_with_dedented_code_blocks(&self, range: Range<usize>) -> String {
+        let mut code_block_text_ranges: Vec<Range<usize>> = Vec::new();
+        let mut in_code_block = false;
+
+        for (event_range, event) in self.parsed_markdown.events.iter() {
+            match event {
+                MarkdownEvent::Start(MarkdownTag::CodeBlock { .. }) => {
+                    in_code_block = true;
+                }
+                MarkdownEvent::End(parser::MarkdownTagEnd::CodeBlock) => {
+                    in_code_block = false;
+                }
+                MarkdownEvent::Text | MarkdownEvent::SubstitutedText(_) if in_code_block => {
+                    if event_range.start < range.end && event_range.end > range.start {
+                        code_block_text_ranges.push(event_range.clone());
+                    }
+                }
+                _ => {}
+            }
+        }
+
+        if code_block_text_ranges.is_empty() {
+            return self.source[range].to_string();
+        }
+
+        let mut result = String::with_capacity(range.len());
+        let mut cursor = range.start;
+
+        for text_range in &code_block_text_ranges {
+            let overlap_start = text_range.start.max(range.start);
+            let overlap_end = text_range.end.min(range.end);
+
+            if overlap_start > cursor {
+                result.push_str(&self.source[cursor..overlap_start]);
+            }
+
+            let full_text = &self.source[text_range.clone()];
+            let indent = common_indent_len(full_text);
+
+            if indent == 0 || overlap_start == overlap_end {
+                result.push_str(&self.source[overlap_start..overlap_end]);
+            } else {
+                // Dedent the full code block text, then extract the portion
+                // that corresponds to the selection. We can't dedent the
+                // selected slice directly because it may start mid-line
+                // (after the indent was already skipped by the selection).
+                let dedented = strip_common_indent(full_text);
+                let offset_in_block = overlap_start - text_range.start;
+                let end_in_block = overlap_end - text_range.start;
+                let dedented_start = map_to_dedented_offset(full_text, indent, offset_in_block);
+                let dedented_end = map_to_dedented_offset(full_text, indent, end_in_block);
+                result.push_str(&dedented[dedented_start..dedented_end.min(dedented.len())]);
+            }
+
+            cursor = overlap_end;
+        }
+
+        if cursor < range.end {
+            result.push_str(&self.source[cursor..range.end]);
+        }
+
+        result
     }
 
     fn parse(&mut self, cx: &mut Context<Self>) {
@@ -1329,7 +1450,8 @@ impl Element for MarkdownElement {
                                 let content_range = content_range.start + range.start
                                     ..content_range.end + range.start;
 
-                                let code = parsed_markdown.source()[content_range].to_string();
+                                let code =
+                                    strip_common_indent(&parsed_markdown.source()[content_range]);
                                 let codeblock = render_copy_code_block_button(
                                     range.end,
                                     code,
@@ -1359,7 +1481,8 @@ impl Element for MarkdownElement {
                                 let content_range = content_range.start + range.start
                                     ..content_range.end + range.start;
 
-                                let code = parsed_markdown.source()[content_range].to_string();
+                                let code =
+                                    strip_common_indent(&parsed_markdown.source()[content_range]);
                                 let codeblock = render_copy_code_block_button(
                                     range.end,
                                     code,
@@ -1416,10 +1539,19 @@ impl Element for MarkdownElement {
                     _ => log::debug!("unsupported markdown tag end: {:?}", tag),
                 },
                 MarkdownEvent::Text => {
-                    builder.push_text(&parsed_markdown.source[range.clone()], range.clone());
+                    let text = &parsed_markdown.source[range.clone()];
+                    if builder.code_block_stack.is_empty() {
+                        builder.push_text(text, range.clone());
+                    } else {
+                        builder.push_dedented_text(text, range.clone());
+                    }
                 }
                 MarkdownEvent::SubstitutedText(text) => {
-                    builder.push_text(text, range.clone());
+                    if builder.code_block_stack.is_empty() {
+                        builder.push_text(text, range.clone());
+                    } else {
+                        builder.push_dedented_text(text, range.clone());
+                    }
                 }
                 MarkdownEvent::Code => {
                     builder.push_text_style(self.style.inline_code.clone());
@@ -1846,6 +1978,68 @@ impl MarkdownElementBuilder {
             source_range,
             destination_url,
         });
+    }
+
+    fn push_dedented_text(&mut self, text: &str, source_range: Range<usize>) {
+        let min_indent = common_indent_len(text);
+        if min_indent == 0 {
+            self.push_text(text, source_range);
+            return;
+        }
+
+        let mut dedented = String::with_capacity(text.len());
+        let rendered_base = self.pending_line.text.len();
+        let mut source_offset = source_range.start;
+
+        for (i, line) in text.split('\n').enumerate() {
+            if i > 0 {
+                dedented.push('\n');
+            }
+
+            let skip = min_indent.min(line.len());
+            let dedented_line = &line[skip..];
+
+            self.pending_line.source_mappings.push(SourceMapping {
+                rendered_index: rendered_base + dedented.len(),
+                source_index: source_offset + skip,
+            });
+
+            dedented.push_str(dedented_line);
+            source_offset += line.len() + 1;
+        }
+
+        self.pending_line.text.push_str(&dedented);
+        self.current_source_index = source_range.end;
+
+        if let Some(Some(language)) = self.code_block_stack.last() {
+            let mut offset = 0;
+            for (range, highlight_id) in
+                language.highlight_text(&Rope::from(dedented.as_str()), 0..dedented.len())
+            {
+                if range.start > offset {
+                    self.pending_line
+                        .runs
+                        .push(self.text_style().to_run(range.start - offset));
+                }
+
+                let mut run_style = self.text_style();
+                if let Some(highlight) = highlight_id.style(&self.syntax_theme) {
+                    run_style = run_style.highlight(highlight);
+                }
+                self.pending_line.runs.push(run_style.to_run(range.len()));
+                offset = range.end;
+            }
+
+            if offset < dedented.len() {
+                self.pending_line
+                    .runs
+                    .push(self.text_style().to_run(dedented.len() - offset));
+            }
+        } else {
+            self.pending_line
+                .runs
+                .push(self.text_style().to_run(dedented.len()));
+        }
     }
 
     fn push_text(&mut self, text: &str, source_range: Range<usize>) {
