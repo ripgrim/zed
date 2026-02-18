@@ -13,7 +13,7 @@ use project::git_store::Repository;
 use std::sync::Arc;
 use time::{OffsetDateTime, UtcOffset};
 use ui::{
-    Button, ButtonStyle, CopyButton, Icon, IconButton, IconName, IconSize, Label, LabelSize,
+    Button, ButtonStyle, CopyButton, Icon, IconButton, IconName, IconSize, Label, LabelSize, Tooltip,
     prelude::*,
 };
 
@@ -126,8 +126,8 @@ impl CommitDetailsSidebar {
         let avatar = CommitAvatar::new(&full_sha, author_email_for_avatar, self.remote.as_ref());
 
         let avatar_element = v_flex()
-            .w(px(64.))
-            .h(px(64.))
+            .w(px(32.))
+            .h(px(32.))
             .border_1()
             .border_color(cx.theme().colors().border)
             .rounded_full()
@@ -136,7 +136,7 @@ impl CommitDetailsSidebar {
             .child(
                 avatar
                     .avatar(window, cx)
-                    .map(|a| a.size(px(64.)).into_any_element())
+                    .map(|a| a.size(px(32.)).into_any_element())
                     .unwrap_or_else(|| {
                         Icon::new(IconName::Person)
                             .color(Color::Muted)
@@ -167,6 +167,7 @@ impl CommitDetailsSidebar {
             .child(
                 div()
                     .id("commit-details")
+                    .w_full()
                     .child(
                         v_flex()
                             .p_3()
@@ -219,17 +220,17 @@ impl CommitDetailsSidebar {
                                                     .color(Color::Muted),
                                             )
                                             .child(
-                                                Label::new(author_name)
-                                                    .size(LabelSize::Small)
-                                                    .color(Color::Muted),
-                                            )
-                                            .when(!author_email.is_empty(), |this| {
-                                                this.child(
-                                                    Label::new(format!("<{}>", author_email))
-                                                        .size(LabelSize::Small)
-                                                        .color(Color::Ignored),
-                                                )
-                                            }),
+                                                div()
+                                                    .id("author-name")
+                                                    .child(
+                                                        Label::new(author_name)
+                                                            .size(LabelSize::Small)
+                                                            .color(Color::Muted),
+                                                    )
+                                                    .when(!author_email.is_empty(), |this| {
+                                                        this.tooltip(Tooltip::text(author_email))
+                                                    }),
+                                            ),
                                     )
                                     .child(
                                         h_flex()
@@ -290,23 +291,16 @@ impl CommitDetailsSidebar {
                                     }),
                             )
                             .child(
-                                div()
-                                    .border_t_1()
-                                    .border_color(cx.theme().colors().border)
-                                    .p_3()
-                                    .min_w_0()
-                                    .child(
-                                        v_flex()
-                                            .gap_2()
-                                            .child(Label::new(subject).weight(FontWeight::MEDIUM))
-                                            .when(!body.is_empty(), |this| {
-                                                this.child(
-                                                    Label::new(body)
-                                                        .size(LabelSize::Small)
-                                                        .color(Color::Muted),
-                                                )
-                                            }),
-                                    ),
+                                v_flex()
+                                    .gap_2()
+                                    .child(Label::new(subject).weight(FontWeight::MEDIUM))
+                                    .when(!body.is_empty(), |this| {
+                                        this.child(
+                                            Label::new(body)
+                                                .size(LabelSize::Small)
+                                                .color(Color::Muted),
+                                        )
+                                    }),
                             ),
                     )
                     .h_1_2()
@@ -316,7 +310,9 @@ impl CommitDetailsSidebar {
             .child(
                 div()
                     .border_t_1()
+                    .border_color(cx.theme().colors().border)
                     .id("changed-files")
+                    .w_full()
                     .child(
                         v_flex()
                             .p_3()
