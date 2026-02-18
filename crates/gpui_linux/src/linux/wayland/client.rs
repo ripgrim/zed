@@ -342,10 +342,10 @@ impl WaylandClientStatePtr {
 
         let text_input = state.text_input.as_ref().unwrap();
         text_input.set_cursor_rectangle(
-            bounds.origin.x.0 as i32,
-            bounds.origin.y.0 as i32,
-            bounds.size.width.0 as i32,
-            bounds.size.height.0 as i32,
+            bounds.origin.x.as_f32() as i32,
+            bounds.origin.y.as_f32() as i32,
+            bounds.size.width.as_f32() as i32,
+            bounds.size.height.as_f32() as i32,
         );
         text_input.commit();
     }
@@ -671,7 +671,7 @@ impl LinuxClient for WaylandClient {
             .outputs
             .iter()
             .find_map(|(object_id, output)| {
-                (object_id.protocol_id() == id.0).then(|| {
+                (object_id.protocol_id() == u32::from(id)).then(|| {
                     Rc::new(WaylandDisplay {
                         id: object_id.clone(),
                         name: output.name.clone(),

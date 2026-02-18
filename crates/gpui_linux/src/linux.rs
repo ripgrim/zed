@@ -13,15 +13,15 @@ mod x11;
 mod xdg_desktop_portal;
 
 pub use dispatcher::*;
-pub use headless::*;
-pub use keyboard::*;
+use headless::*;
+use keyboard::*;
 pub use platform::*;
 #[cfg(any(feature = "wayland", feature = "x11"))]
-pub use text_system::*;
+use text_system::*;
 #[cfg(feature = "wayland")]
-pub use wayland::*;
+use wayland::*;
 #[cfg(feature = "x11")]
-pub use x11::*;
+use x11::*;
 
 use std::rc::Rc;
 
