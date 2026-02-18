@@ -4,7 +4,7 @@ mod mention;
 mod terminal;
 
 use agent_settings::{AgentSettings, ToolPermissionRulesOutcome, check_tool_permission_rules};
-use settings::Settings as _;
+use settings::{Settings as _, SettingsStore};
 
 /// Key used in ACP ToolCall meta to store the tool's programmatic name.
 /// This is a workaround since ACP's ToolCall doesn't have a dedicated name field.
@@ -1180,7 +1180,7 @@ impl AcpThread {
         });
 
         let observe_settings =
-            cx.observe_global::<AgentSettings>(Self::re_evaluate_pending_authorizations);
+            cx.observe_global::<SettingsStore>(Self::re_evaluate_pending_authorizations);
 
         let (user_stop_tx, _user_stop_rx) = watch::channel(false);
 
