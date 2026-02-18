@@ -522,7 +522,7 @@ impl GitRepository for FakeGitRepository {
                     .worktrees
                     .iter_mut()
                     .find(|worktree| worktree.path == old_path)
-                    .expect("worktree was validated above");
+                    .context("worktree disappeared between validation and state update")?;
                 worktree.path = new_path;
                 Ok::<(), anyhow::Error>(())
             })??;

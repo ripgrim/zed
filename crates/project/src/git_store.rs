@@ -5589,7 +5589,7 @@ impl Repository {
                             this.update(&mut cx, |_this, cx| {
                                 cx.emit(RepositoryEvent::WorktreesChanged);
                             })
-                            .ok();
+                            .log_err();
                         }
                         result
                     }
@@ -5603,6 +5603,11 @@ impl Repository {
                                 commit,
                             })
                             .await?;
+
+                        this.update(&mut cx, |_this, cx| {
+                            cx.emit(RepositoryEvent::WorktreesChanged);
+                        })
+                        .log_err();
 
                         Ok(())
                     }
@@ -5629,7 +5634,7 @@ impl Repository {
                             this.update(&mut cx, |_this, cx| {
                                 cx.emit(RepositoryEvent::WorktreesChanged);
                             })
-                            .ok();
+                            .log_err();
                         }
                         result
                     }
@@ -5642,6 +5647,11 @@ impl Repository {
                                 force,
                             })
                             .await?;
+
+                        this.update(&mut cx, |_this, cx| {
+                            cx.emit(RepositoryEvent::WorktreesChanged);
+                        })
+                        .log_err();
 
                         Ok(())
                     }
@@ -5668,7 +5678,7 @@ impl Repository {
                             this.update(&mut cx, |_this, cx| {
                                 cx.emit(RepositoryEvent::WorktreesChanged);
                             })
-                            .ok();
+                            .log_err();
                         }
                         result
                     }
@@ -5681,6 +5691,11 @@ impl Repository {
                                 new_path: new_path.to_string_lossy().to_string(),
                             })
                             .await?;
+
+                        this.update(&mut cx, |_this, cx| {
+                            cx.emit(RepositoryEvent::WorktreesChanged);
+                        })
+                        .log_err();
 
                         Ok(())
                     }

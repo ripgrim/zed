@@ -211,7 +211,9 @@ pub fn parse_worktrees_from_str<T: AsRef<str>>(raw_worktrees: T) -> Vec<Worktree
         let mut ref_name = None;
 
         for line in entry.lines() {
-            let line = line.trim();
+            // Don't trim whitespace — git's porcelain output has a well-defined
+            // format with no extraneous whitespace, and filesystem paths can
+            // legitimately contain leading or trailing spaces.
             if line.is_empty() {
                 continue;
             }
@@ -3689,14 +3691,13 @@ mod tests {
         assert_eq!(result[2].path, PathBuf::from("/home/user/prunable-wt"));
         assert_eq!(result[2].ref_name.as_ref(), "refs/heads/prunable-branch");
 
-        // Leading/trailing whitespace on lines should be tolerated
+        // Leading/trailing whitespace on lines is NOT trimmed — git's porcelain
+        // format is well-defined and path components could contain spaces.
+        // Whitespace-padded lines won't match the expected prefixes.
         let input =
             "  worktree /home/user/project  \n  HEAD abc123  \n  branch refs/heads/main  \n\n";
         let result = parse_worktrees_from_str(input);
-        assert_eq!(result.len(), 1);
-        assert_eq!(result[0].path, PathBuf::from("/home/user/project"));
-        assert_eq!(result[0].sha.as_ref(), "abc123");
-        assert_eq!(result[0].ref_name.as_ref(), "refs/heads/main");
+        assert_eq!(result.len(), 0, "whitespace-padded lines should not parse");
 
         // Windows-style line endings should be handled
         let input = "worktree /home/user/project\r\nHEAD abc123\r\nbranch refs/heads/main\r\n\r\n";

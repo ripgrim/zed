@@ -12,7 +12,7 @@ use gpui::{
 use picker::{Picker, PickerDelegate, PickerEditorPosition};
 use project::{
     DirectoryLister,
-    git_store::Repository,
+    git_store::{Repository, RepositoryEvent},
     trusted_worktrees::{PathTrust, TrustedWorktrees},
 };
 use remote::{RemoteConnectionOptions, remote_client::ConnectionIdentifier};
@@ -51,7 +51,7 @@ pub struct WorktreeList {
     width: Rems,
     pub picker: Entity<Picker<WorktreeListDelegate>>,
     picker_focus_handle: FocusHandle,
-    _subscription: Option<Subscription>,
+    _subscriptions: Vec<Subscription>,
     embedded: bool,
 }
 
@@ -64,9 +64,10 @@ impl WorktreeList {
         cx: &mut Context<Self>,
     ) -> Self {
         let mut this = Self::new_inner(repository, workspace, width, false, window, cx);
-        this._subscription = Some(cx.subscribe(&this.picker, |_, _, _, cx| {
-            cx.emit(DismissEvent);
-        }));
+        this._subscriptions
+            .push(cx.subscribe(&this.picker, |_, _, _, cx| {
+                cx.emit(DismissEvent);
+            }));
         this
     }
 
@@ -78,6 +79,8 @@ impl WorktreeList {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
+        let mut _subscriptions = Vec::new();
+
         let all_worktrees_request = repository
             .clone()
             .map(|repository| repository.update(cx, |repository, _| repository.worktrees()));
@@ -85,6 +88,29 @@ impl WorktreeList {
         let default_branch_request = repository.clone().map(|repository| {
             repository.update(cx, |repository, _| repository.default_branch(false))
         });
+
+        if let Some(repo) = repository.clone() {
+            _subscriptions.push(cx.subscribe_in(
+                &repo,
+                window,
+                |_this, repo, event, window, cx| {
+                    if matches!(event, RepositoryEvent::WorktreesChanged) {
+                        let worktrees_request = repo.update(cx, |repo, _| repo.worktrees());
+                        cx.spawn_in(window, async move |this, cx| {
+                            let worktrees = worktrees_request.await??;
+                            this.update_in(cx, |this, window, cx| {
+                                this.picker.update(cx, |picker, cx| {
+                                    picker.delegate.all_worktrees = Some(worktrees);
+                                    picker.refresh(window, cx);
+                                });
+                            })?;
+                            anyhow::Ok(())
+                        })
+                        .detach_and_log_err(cx);
+                    }
+                },
+            ));
+        }
 
         cx.spawn_in(window, async move |this, cx| {
             let all_worktrees = all_worktrees_request
@@ -126,7 +152,7 @@ impl WorktreeList {
             picker,
             picker_focus_handle,
             width,
-            _subscription: None,
+            _subscriptions,
             embedded,
         }
     }
@@ -139,9 +165,10 @@ impl WorktreeList {
         cx: &mut Context<Self>,
     ) -> Self {
         let mut this = Self::new_inner(repository, workspace, width, true, window, cx);
-        this._subscription = Some(cx.subscribe(&this.picker, |_, _, _, cx| {
-            cx.emit(DismissEvent);
-        }));
+        this._subscriptions
+            .push(cx.subscribe(&this.picker, |_, _, _, cx| {
+                cx.emit(DismissEvent);
+            }));
         this
     }
 
