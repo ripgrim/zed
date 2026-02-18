@@ -1445,7 +1445,11 @@ async fn test_jump_and_edit_throttles_are_independent(cx: &mut TestAppContext) {
 
     // First jump request - no prior jump, so not throttled (independent from edit).
     ep_store.update(cx, |ep_store, cx| {
-        ep_store.refresh_prediction_from_diagnostics(project.clone(), cx);
+        ep_store.refresh_prediction_from_diagnostics(
+            project.clone(),
+            DiagnosticSearchScope::Global,
+            cx,
+        );
     });
     let (_jump_request, jump_response_tx) = requests.predict.next().await.unwrap();
     jump_response_tx.send(empty_response()).unwrap();
@@ -1455,18 +1459,23 @@ async fn test_jump_and_edit_throttles_are_independent(cx: &mut TestAppContext) {
     ep_store.update(cx, |ep_store, cx| {
         ep_store.refresh_prediction_from_buffer(project.clone(), buffer.clone(), position, cx);
     });
-    assert_no_predict_request_within(cx, &mut requests.predict, Duration::from_millis(50)).await;
+    assert_no_predict_request_ready(&mut requests.predict);
 
     // Second jump request - should be throttled by the first jump.
     ep_store.update(cx, |ep_store, cx| {
-        ep_store.refresh_prediction_from_diagnostics(project.clone(), cx);
+        ep_store.refresh_prediction_from_diagnostics(
+            project.clone(),
+            DiagnosticSearchScope::Global,
+            cx,
+        );
     });
-    assert_no_predict_request_within(cx, &mut requests.predict, Duration::from_millis(50)).await;
+    assert_no_predict_request_ready(&mut requests.predict);
 
     // Wait for both throttles to expire.
     cx.background_executor
-        .timer(Duration::from_millis(250))
-        .await;
+        .advance_clock(Duration::from_millis(250));
+    cx.background_executor.run_until_parked();
+    cx.run_until_parked();
 
     // Both requests should now go through.
     let (_request_1, response_tx_1) = requests.predict.next().await.unwrap();
@@ -1710,24 +1719,14 @@ fn prompt_from_request(request: &PredictEditsV3Request) -> String {
     zeta_prompt::format_zeta_prompt(&request.input, zeta_prompt::ZetaFormat::default())
 }
 
-async fn assert_no_predict_request_within(
-    cx: &mut TestAppContext,
+fn assert_no_predict_request_ready(
     requests: &mut mpsc::UnboundedReceiver<(
         PredictEditsV3Request,
         oneshot::Sender<PredictEditsV3Response>,
     )>,
-    duration: Duration,
 ) {
-    let mut timer = cx.background_executor.timer(duration).fuse();
-    let mut next_request = requests.next().fuse();
-
-    futures::select_biased! {
-        _ = timer => {}
-        request = next_request => {
-            if request.is_some() {
-                panic!("Unexpected prediction request before throttle elapsed.");
-            }
-        }
+    if requests.next().now_or_never().flatten().is_some() {
+        panic!("Unexpected prediction request while throttled.");
     }
 }
 

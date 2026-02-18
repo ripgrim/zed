@@ -446,10 +446,19 @@ impl PredictionRequestedBy {
     }
 }
 
+// todo! just use request reason
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 enum PredictionThrottleKind {
     Edit,
     Jump,
+}
+
+const DIAGNOSTIC_LINES_RANGE: u32 = 20;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum DiagnosticSearchScope {
+    Local,
+    Global,
 }
 
 #[derive(Debug)]
@@ -733,15 +742,13 @@ impl EditPredictionStore {
         self.throttle_timeout_override = Some(duration);
     }
 
-    #[cfg(test)]
     fn throttle_timeout(&self) -> Duration {
-        self.throttle_timeout_override
-            .unwrap_or(Self::THROTTLE_TIMEOUT)
-    }
-
-    #[cfg(not(test))]
-    fn throttle_timeout(&self) -> Duration {
-        Self::THROTTLE_TIMEOUT
+        #[cfg(test)]
+        return self
+            .throttle_timeout_override
+            .unwrap_or(Self::THROTTLE_TIMEOUT);
+        #[cfg(not(test))]
+        return Self::THROTTLE_TIMEOUT;
     }
 
     pub fn icons(&self) -> edit_prediction_types::EditPredictionIconSet {
@@ -1041,7 +1048,11 @@ impl EditPredictionStore {
             }
             project::Event::DiagnosticsUpdated { .. } => {
                 if cx.has_flag::<Zeta2FeatureFlag>() {
-                    self.refresh_prediction_from_diagnostics(project, cx);
+                    self.refresh_prediction_from_diagnostics(
+                        project,
+                        DiagnosticSearchScope::Global,
+                        cx,
+                    );
                 }
             }
             _ => (),
@@ -1523,6 +1534,7 @@ impl EditPredictionStore {
     pub fn refresh_prediction_from_diagnostics(
         &mut self,
         project: Entity<Project>,
+        scope: DiagnosticSearchScope,
         cx: &mut Context<Self>,
     ) {
         let Some(project_state) = self.projects.get_mut(&project.entity_id()) else {
@@ -1532,7 +1544,7 @@ impl EditPredictionStore {
         // Prefer predictions from buffer
         if project_state.current_prediction.is_some() {
             return;
-        };
+        }
 
         self.queue_prediction_refresh(
             project.clone(),
@@ -1563,10 +1575,21 @@ impl EditPredictionStore {
                 };
 
                 cx.spawn(async move |cx| {
+                    let diagnostic_search_range = match scope {
+                        DiagnosticSearchScope::Local => {
+                            let diagnostic_search_start =
+                                cursor_point.row.saturating_sub(DIAGNOSTIC_LINES_RANGE);
+                            let diagnostic_search_end = cursor_point.row + DIAGNOSTIC_LINES_RANGE;
+                            Point::new(diagnostic_search_start, 0)
+                                ..Point::new(diagnostic_search_end, 0)
+                        }
+                        DiagnosticSearchScope::Global => Default::default(),
+                    };
+
                     let Some((jump_buffer, jump_position)) = Self::next_diagnostic_location(
                         active_buffer,
                         &snapshot,
-                        Default::default(),
+                        diagnostic_search_range,
                         cursor_point,
                         &project,
                         cx,
@@ -1675,11 +1698,12 @@ impl EditPredictionStore {
         };
 
         let task = cx.spawn(async move |this, cx| {
-            if let Some((last_entity, last_timestamp)) = last_request
-                && throttle_entity == last_entity
-                && let Some(timeout) =
-                    (last_timestamp + throttle_timeout).checked_duration_since(Instant::now())
-            {
+            if let Some(timeout) = last_request.and_then(|(last_entity, last_timestamp)| {
+                if throttle_entity != last_entity {
+                    return None;
+                }
+                (last_timestamp + throttle_timeout).checked_duration_since(Instant::now())
+            }) {
                 cx.background_executor().timer(timeout).await;
             }
 
@@ -1688,10 +1712,10 @@ impl EditPredictionStore {
             let mut is_cancelled = true;
             this.update(cx, |this, cx| {
                 let project_state = this.get_or_init_project(&project, cx);
-                if !project_state
+                let was_cancelled = project_state
                     .cancelled_predictions
-                    .remove(&pending_prediction_id)
-                {
+                    .remove(&pending_prediction_id);
+                if !was_cancelled {
                     let new_refresh = (throttle_entity, Instant::now());
                     match throttle_kind {
                         PredictionThrottleKind::Edit => {
@@ -1700,7 +1724,7 @@ impl EditPredictionStore {
                         PredictionThrottleKind::Jump => {
                             project_state.last_jump_prediction_refresh = Some(new_refresh);
                         }
-                    }
+                    };
                     is_cancelled = false;
                 }
             })
@@ -1810,46 +1834,6 @@ impl EditPredictionStore {
         }
     }
 
-    async fn wait_for_throttle(
-        this: &WeakEntity<Self>,
-        project: &Entity<Project>,
-        throttle_kind: PredictionThrottleKind,
-        throttle_entity: EntityId,
-        cx: &mut AsyncApp,
-    ) -> Result<()> {
-        let (last_request, throttle_timeout) = this.update(cx, |this, cx| {
-            let project_state = this.get_or_init_project(project, cx);
-            let last_request = match throttle_kind {
-                PredictionThrottleKind::Edit => project_state.last_edit_prediction_refresh,
-                PredictionThrottleKind::Jump => project_state.last_jump_prediction_refresh,
-            };
-            (last_request, this.throttle_timeout())
-        })?;
-
-        if let Some((last_entity, last_timestamp)) = last_request
-            && throttle_entity == last_entity
-            && let Some(timeout) =
-                (last_timestamp + throttle_timeout).checked_duration_since(Instant::now())
-        {
-            cx.background_executor().timer(timeout).await;
-        }
-
-        this.update(cx, |this, cx| {
-            let project_state = this.get_or_init_project(project, cx);
-            let new_refresh = (throttle_entity, Instant::now());
-            match throttle_kind {
-                PredictionThrottleKind::Edit => {
-                    project_state.last_edit_prediction_refresh = Some(new_refresh);
-                }
-                PredictionThrottleKind::Jump => {
-                    project_state.last_jump_prediction_refresh = Some(new_refresh);
-                }
-            }
-        })?;
-
-        Ok(())
-    }
-
     pub fn request_prediction(
         &mut self,
         project: &Entity<Project>,
@@ -1877,8 +1861,6 @@ impl EditPredictionStore {
         allow_jump: bool,
         cx: &mut Context<Self>,
     ) -> Task<Result<Option<EditPredictionResult>>> {
-        const DIAGNOSTIC_LINES_RANGE: u32 = 20;
-
         self.get_or_init_project(&project, cx);
         let project_state = self.projects.get(&project.entity_id()).unwrap();
         let stored_events = project_state.events(cx);
@@ -1953,41 +1935,14 @@ impl EditPredictionStore {
         cx.spawn(async move |this, cx| {
             let prediction = task.await?;
 
-            if prediction.is_none() && allow_jump {
-                let cursor_point = position.to_point(&snapshot);
-                if has_events
-                    && let Some((jump_buffer, jump_position)) = Self::next_diagnostic_location(
-                        active_buffer.clone(),
-                        &snapshot,
-                        diagnostic_search_range,
-                        cursor_point,
-                        &project,
+            if prediction.is_none() && allow_jump && has_events {
+                this.update(cx, |this, cx| {
+                    this.refresh_prediction_from_diagnostics(
+                        project,
+                        DiagnosticSearchScope::Local,
                         cx,
-                    )
-                    .await?
-                {
-                    Self::wait_for_throttle(
-                        &this,
-                        &project,
-                        PredictionThrottleKind::Jump,
-                        project.entity_id(),
-                        cx,
-                    )
-                    .await?;
-                    return this
-                        .update(cx, |this, cx| {
-                            this.request_prediction_internal(
-                                project,
-                                jump_buffer,
-                                jump_position,
-                                trigger,
-                                false,
-                                cx,
-                            )
-                        })?
-                        .await;
-                }
-
+                    );
+                })?;
                 return anyhow::Ok(None);
             }
 
