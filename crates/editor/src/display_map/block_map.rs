@@ -282,6 +282,7 @@ pub struct BlockContext<'a, 'b> {
     pub app: &'b mut App,
     pub anchor_x: Pixels,
     pub max_width: Pixels,
+    pub horizontal_scroll_position: Pixels,
     pub margins: &'b EditorMargins,
     pub em_width: Pixels,
     pub line_height: Pixels,
@@ -1713,6 +1714,7 @@ pub(crate) fn balancing_block(
                 cx.block_id,
                 cx.height,
                 cx.line_height,
+                cx.horizontal_scroll_position,
                 cx.window,
                 cx.app,
             )

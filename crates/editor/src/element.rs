@@ -3847,6 +3847,7 @@ impl EditorElement {
         editor_margins: &EditorMargins,
         line_height: Pixels,
         em_width: Pixels,
+        horizontal_scroll_position: Pixels,
         text_hitbox: &Hitbox,
         editor_width: Pixels,
         scroll_width: &mut Pixels,
@@ -3915,6 +3916,7 @@ impl EditorElement {
                         margins: editor_margins,
                         line_height,
                         em_width,
+                        horizontal_scroll_position,
                         block_id,
                         height: custom.height.unwrap_or(1),
                         selected,
@@ -4008,7 +4010,7 @@ impl EditorElement {
             }
 
             Block::Spacer { height, .. } => {
-                Self::render_spacer_block(block_id, *height, line_height, window, cx)
+                Self::render_spacer_block(block_id, *height, line_height, horizontal_scroll_position, window, cx)
             }
         };
 
@@ -4092,9 +4094,17 @@ impl EditorElement {
         block_id: BlockId,
         block_height: u32,
         line_height: Pixels,
+        horizontal_scroll_position: Pixels,
         window: &mut Window,
         cx: &App,
     ) -> AnyElement {
+        let target_size = 16.0;
+        let scale = window.scale_factor();
+        let checkerboard_size =
+            Self::checkerboard_size(f32::from(line_height) * scale, target_size * scale);
+        let period_logical = 2.0 * checkerboard_size / scale;
+        let offset = f32::from(horizontal_scroll_position) % period_logical;
+
         div()
             .id(block_id)
             .w_full()
@@ -4102,14 +4112,18 @@ impl EditorElement {
             // the checkerboard pattern is semi-transparent, so we render a
             // solid background to prevent indent guides peeking through
             .bg(cx.theme().colors().editor_background)
+            .overflow_hidden()
             .child(
                 div()
-                    .size_full()
-                    .bg(checkerboard(cx.theme().colors().panel_background, {
-                        let target_size = 16.0;
-                        let scale = window.scale_factor();
-                        Self::checkerboard_size(f32::from(line_height) * scale, target_size * scale)
-                    })),
+                    .absolute()
+                    .top_0()
+                    .right_0()
+                    .bottom_0()
+                    .left(px(-offset))
+                    .bg(checkerboard(
+                        cx.theme().colors().panel_background,
+                        checkerboard_size,
+                    )),
             )
             .into_any()
     }
@@ -4146,6 +4160,7 @@ impl EditorElement {
         scroll_width: &mut Pixels,
         editor_margins: &EditorMargins,
         em_width: Pixels,
+        horizontal_scroll_position: Pixels,
         text_x: Pixels,
         line_height: Pixels,
         line_layouts: &mut [LineWithInvisibles],
@@ -4189,6 +4204,7 @@ impl EditorElement {
                 editor_margins,
                 line_height,
                 em_width,
+                horizontal_scroll_position,
                 text_hitbox,
                 editor_width,
                 scroll_width,
@@ -4248,6 +4264,7 @@ impl EditorElement {
                 editor_margins,
                 line_height,
                 em_width,
+                horizontal_scroll_position,
                 text_hitbox,
                 editor_width,
                 scroll_width,
@@ -4305,6 +4322,7 @@ impl EditorElement {
                 editor_margins,
                 line_height,
                 em_width,
+                horizontal_scroll_position,
                 text_hitbox,
                 editor_width,
                 scroll_width,
@@ -10190,6 +10208,7 @@ impl Element for EditorElement {
                                     &mut scroll_width,
                                     &editor_margins,
                                     em_width,
+                                    px((scroll_position.x * f64::from(em_layout_width)) as f32),
                                     gutter_dimensions.full_width(),
                                     line_height,
                                     &mut line_layouts,
