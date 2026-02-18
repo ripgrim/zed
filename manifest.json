@@ -1,1 +1,28 @@
-{"suggestions":[]}
+{
+  "suggestions": [
+    {
+      "pr": 48908,
+      "title": "git: Add click with modifier to set default for side-by-side diff toolbar buttons",
+      "file": "suggestions/PR-48908.md",
+      "date": "2026-02-11T05:07:51Z"
+    },
+    {
+      "pr": 48909,
+      "title": "agent_ui: Fix keybinding display inside tooltips in the footer actions",
+      "file": "suggestions/PR-48909.md",
+      "date": "2026-02-11T05:12:31Z"
+    },
+    {
+      "pr": 48910,
+      "title": "git: Standardize nomenclature for side-by-side diff",
+      "file": "suggestions/PR-48910.md",
+      "date": "2026-02-11T05:33:03Z"
+    },
+    {
+      "pr": 48912,
+      "title": "git: Enable the split diff for everyone",
+      "file": "suggestions/PR-48912.md",
+      "date": "2026-02-11T06:28:55Z"
+    }
+  ]
+}
