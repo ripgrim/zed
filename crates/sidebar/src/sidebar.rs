@@ -1,8 +1,9 @@
 use acp_thread::{AcpThread, AcpThreadEvent, ThreadStatus};
 use agent_client_protocol as acp;
+use agent_ui::acp::AcpThreadView;
 use gpui::{
     App, Context, Entity, EventEmitter, FocusHandle, Focusable, Pixels, Render, SharedString,
-    Subscription, Task, Window, WindowHandle, px,
+    Subscription, Task, Window, px,
 };
 use picker::{Picker, PickerDelegate};
 use std::collections::HashMap;
@@ -11,7 +12,7 @@ use theme::ActiveTheme;
 use ui::utils::TRAFFIC_LIGHT_PADDING;
 use ui::{KeyBinding, Tab, ThreadItem, Tooltip, prelude::*};
 use ui_input::ErasedEditor;
-use util::debug_panic;
+
 use workspace::{
     FocusWorkspaceSidebar, MultiWorkspace, NewWorkspaceInWindow, Sidebar as WorkspaceSidebar,
     SidebarEvent, ToggleWorkspaceSidebar,
@@ -156,13 +157,12 @@ impl Sidebar {
                 .modal(false)
         });
 
-        let original_window_handle = window.window_handle();
-
         let sidebar = cx.weak_entity();
-        let observe_threads = cx.observe_new::<AcpThread>(move |thread, _, cx| {
+        let observe_threads = cx.observe_new::<AcpThreadView>(move |thread_view, window, cx| {
+            let icon = thread_view.agent_icon;
+            let thread = thread_view.thread.read(cx);
             let session_id = thread.session_id().clone();
             let title = thread.title();
-            let thread_entity = cx.entity();
             let running = thread.status() == ThreadStatus::Generating;
 
             let worktree_label: SharedString = thread
@@ -182,27 +182,26 @@ impl Sidebar {
 
             sidebar
                 .update(cx, |sidebar, cx| {
-                    original_window_handle
-                        .update(cx, |_, window, cx| {
-                            sidebar.picker.update(cx, |picker, cx| {
-                                let info = AgentThreadInfo {
-                                    title,
-                                    icon: IconName::ZedAgent,
-                                    running,
-                                    worktree_label: "".into(),
-                                };
-                                picker.delegate.threads.insert(session_id.clone(), info);
-                                picker.delegate.thread_ids.push(session_id);
-                                picker.refresh(window, cx);
+                    sidebar.picker.update(cx, |picker, cx| {
+                        let info = AgentThreadInfo {
+                            title,
+                            icon,
+                            running,
+                            worktree_label,
+                        };
+                        picker.delegate.threads.insert(session_id.clone(), info);
+                        picker.delegate.thread_ids.push(session_id);
 
-                                cx.notify();
-                            });
-                        })
-                        .ok();
+                        if let Some(window) = window {
+                            picker.refresh(window, cx);
+                        }
+
+                        cx.notify();
+                    });
 
                     sidebar
                         ._thread_subscriptions
-                        .push(cx.subscribe(&thread_entity, Self::on_thread_event));
+                        .push(cx.subscribe(&thread_view.thread, Self::on_thread_event));
                 })
                 .ok();
         });
@@ -222,7 +221,6 @@ impl Sidebar {
         event: &AcpThreadEvent,
         cx: &mut Context<Self>,
     ) {
-        dbg!("thread event");
         match event {
             AcpThreadEvent::TitleUpdated => {
                 let thread = thread.read(cx);
