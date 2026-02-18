@@ -1250,3 +1250,75 @@ async fn test_repository_create_worktree_duplicate_branch(
         "original worktree should be unaffected"
     );
 }
+
+#[gpui::test]
+async fn test_repository_host_sees_worktrees_changed_on_remote_op(
+    executor: BackgroundExecutor,
+    cx_a: &mut TestAppContext,
+    cx_b: &mut TestAppContext,
+) {
+    let mut server = TestServer::start(executor.clone()).await;
+    let (client_a, _client_b, project_a, repo_b) =
+        setup_remote_git_project(&executor, &mut server, cx_a, cx_b).await;
+
+    // Get the host's (client A's) Repository entity.
+    let repo_a = cx_a.update(|cx| project_a.read(cx).active_repository(cx).unwrap());
+
+    // Pre-populate a worktree on the host.
+    client_a
+        .fs()
+        .create_dir(Path::new("/worktrees/host-branch"))
+        .await
+        .unwrap();
+    client_a
+        .fs()
+        .with_git_state(Path::new(path!("/project/.git")), false, |state| {
+            state.worktrees.push(git::repository::Worktree {
+                path: PathBuf::from("/worktrees/host-branch"),
+                ref_name: "refs/heads/host-branch".into(),
+                sha: "abc123".into(),
+            });
+        })
+        .unwrap();
+    executor.run_until_parked();
+
+    // Subscribe to the HOST's Repository events.
+    let host_events = Arc::new(Mutex::new(Vec::new()));
+    let _host_subscription = cx_a.update(|cx| {
+        let host_events = host_events.clone();
+        cx.subscribe(&repo_a, move |_, event: &RepositoryEvent, _| {
+            host_events.lock().push(event.clone());
+        })
+    });
+
+    // Client B removes the worktree via the remote RPC path.
+    cx_b.update(|cx| {
+        repo_b.update(cx, |repo, cx| {
+            repo.remove_worktree(PathBuf::from("/worktrees/host-branch"), false, cx)
+        })
+    })
+    .await
+    .unwrap()
+    .unwrap();
+    executor.run_until_parked();
+
+    // The HOST's Repository should have emitted WorktreesChanged.
+    assert!(
+        host_events
+            .lock()
+            .iter()
+            .any(|e| matches!(e, RepositoryEvent::WorktreesChanged)),
+        "host Repository should emit WorktreesChanged when a remote client removes a worktree"
+    );
+
+    // Verify the host's state was actually updated.
+    client_a
+        .fs()
+        .with_git_state(Path::new(path!("/project/.git")), false, |state| {
+            assert!(
+                state.worktrees.is_empty(),
+                "host should have no worktrees after remote client removed it"
+            );
+        })
+        .unwrap();
+}
