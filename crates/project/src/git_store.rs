@@ -6474,6 +6474,12 @@ fn emit_worktrees_changed(
     result: Result<()>,
 ) -> Result<()> {
     if result.is_ok() {
+        // TODO: When the operation was initiated by a remote client (via RPC), this
+        // event is emitted on both the host's Repository and the initiating client's
+        // Repository. However, other connected clients are not notified — there is no
+        // mechanism to broadcast WorktreesChanged to all project participants. Their
+        // WorktreeList UIs will show stale data until manually refreshed.
+
         // The entity may have been dropped (e.g. project closed) while the job
         // was in flight. In that case there is nobody left to care about the
         // event, so swallowing the update error is intentional.
