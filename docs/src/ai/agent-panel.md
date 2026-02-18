@@ -27,8 +27,10 @@ Expand the editor with {#kb agent::ExpandMessageEditor} if you need more room.
 Responses stream in with indicators showing [which tools](./tools.md) the model is using.
 The sections below cover what you can do from here.
 
-> Note that for external agents, like [Gemini CLI](./external-agents.md#gemini-cli) or [Claude Agent](./external-agents.md#claude-agent), some of the features outlined below may _not_ be supported—for example, _restoring threads from history_, _checkpoints_, _token usage display_, and others.
-> Their availability varies depending on the agent.
+> Note that for external agents, like [Gemini CLI](./external-agents.md#gemini-cli)
+> or [Claude Agent](./external-agents.md#claude-agent), some of the features
+> outlined below may _not_ be supported—for example, _checkpoints_, _token usage
+> display_, and others. Their availability varies depending on the agent.
 
 ### Creating New Threads {#new-thread}
 
