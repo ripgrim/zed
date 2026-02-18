@@ -13,7 +13,7 @@ use project::git_store::Repository;
 use std::sync::Arc;
 use time::{OffsetDateTime, UtcOffset};
 use ui::{
-    Button, ButtonStyle, CopyButton, Icon, IconButton, IconName, IconSize, Label, LabelSize, Tooltip,
+    ButtonLike, ButtonStyle, CopyButton, Icon, IconButton, IconName, IconSize, Label, LabelSize, Tooltip,
     prelude::*,
 };
 
@@ -175,6 +175,7 @@ impl CommitDetailsSidebar {
                             .child(
                                 h_flex()
                                     .w_full()
+                                    .px_1()
                                     .items_start()
                                     .justify_between()
                                     .child(avatar_element)
@@ -190,6 +191,7 @@ impl CommitDetailsSidebar {
                             )
                             .child(
                                 v_flex()
+                                    .px_1()
                                     .gap_0p5()
                                     .child(
                                         Label::new(author_name.clone())
@@ -201,13 +203,6 @@ impl CommitDetailsSidebar {
                                             .size(LabelSize::Small),
                                     ),
                             )
-                            .when(!ref_names.is_empty(), |this| {
-                                this.child(h_flex().pt_1().gap_1().flex_wrap().children(
-                                    ref_names.iter().map(|name| {
-                                        render_badge(name, accent_color).into_any_element()
-                                    }),
-                                ))
-                            })
                             .child(
                                 v_flex()
                                     .gap_1p5()
@@ -215,9 +210,17 @@ impl CommitDetailsSidebar {
                                         h_flex()
                                             .gap_1()
                                             .child(
-                                                Icon::new(IconName::Person)
-                                                    .size(IconSize::Small)
-                                                    .color(Color::Muted),
+                                                div()
+                                                    .w_5()
+                                                    .h_5()
+                                                    .flex()
+                                                    .items_center()
+                                                    .justify_center()
+                                                    .child(
+                                                        Icon::new(IconName::Person)
+                                                            .size(IconSize::Small)
+                                                            .color(Color::Muted),
+                                                    )
                                             )
                                             .child(
                                                 div()
@@ -232,24 +235,20 @@ impl CommitDetailsSidebar {
                                                     }),
                                             ),
                                     )
-                                    .child(
+                                    .child({
+                                        let short_sha: SharedString = full_sha.chars().take(7).collect::<String>().into();
                                         h_flex()
                                             .gap_1()
                                             .child(
-                                                Icon::new(IconName::Hash)
-                                                    .size(IconSize::Small)
-                                                    .color(Color::Muted),
+                                                CopyButton::new("copy-sha", full_sha.to_string())
+                                                    .tooltip_label("Copy SHA"),
                                             )
                                             .child(
-                                                Label::new(full_sha.clone())
+                                                Label::new(short_sha)
                                                     .size(LabelSize::Small)
                                                     .color(Color::Muted),
                                             )
-                                            .child(
-                                                CopyButton::new("copy-sha", full_sha.to_string())
-                                                    .tooltip_label("Copy SHA"),
-                                            ),
-                                    )
+                                    })
                                     .when_some(remote, |this, remote| {
                                         let provider_name = remote.host.name();
                                         let icon = match provider_name.as_str() {
@@ -268,30 +267,41 @@ impl CommitDetailsSidebar {
                                             .build_commit_permalink(&parsed_remote, params)
                                             .to_string();
                                         this.child(
-                                            h_flex()
-                                                .gap_1()
-                                                .child(
-                                                    Icon::new(icon)
-                                                        .size(IconSize::Small)
-                                                        .color(Color::Muted),
-                                                )
-                                                .child(
-                                                    Button::new(
-                                                        "view-on-provider",
-                                                        format!("View on {}", provider_name),
+                                            h_flex().child(
+                                                ButtonLike::new("view-on-provider")
+                                                    .style(ButtonStyle::Subtle)
+                                                    .child(
+                                                        h_flex()
+                                                            .gap_1()
+                                                            .child(
+                                                                Icon::new(icon)
+                                                                    .size(IconSize::Small)
+                                                                    .color(Color::Muted),
+                                                            )
+                                                            .child(
+                                                                Label::new(format!("View on {}", provider_name))
+                                                                    .size(LabelSize::Small)
+                                                                    .color(Color::Muted),
+                                                            ),
                                                     )
-                                                    .style(ButtonStyle::Transparent)
-                                                    .label_size(LabelSize::Small)
-                                                    .color(Color::Muted)
                                                     .on_click(move |_, _, cx| {
                                                         cx.open_url(&url);
                                                     }),
-                                                ),
+                                            ),
                                         )
+
                                     }),
                             )
+                            .when(!ref_names.is_empty(), |this| {
+                                this.child(h_flex().pt_1().gap_1().flex_wrap().children(
+                                    ref_names.iter().map(|name| {
+                                        render_badge(name, accent_color).into_any_element()
+                                    }),
+                                ))
+                            })
                             .child(
                                 v_flex()
+                                    .px_1()
                                     .gap_2()
                                     .child(Label::new(subject).weight(FontWeight::MEDIUM))
                                     .when(!body.is_empty(), |this| {
