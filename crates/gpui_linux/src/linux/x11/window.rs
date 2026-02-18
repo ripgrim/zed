@@ -34,33 +34,6 @@ use std::{
 
 use super::{X11Display, XINPUT_ALL_DEVICE_GROUPS, XINPUT_ALL_DEVICES};
 
-/// Convert X11 connection errors to `anyhow::Error` and panic for unrecoverable errors.
-pub(crate) fn handle_connection_error(err: ConnectionError) -> anyhow::Error {
-    match err {
-        ConnectionError::UnknownError => anyhow!("X11 connection: Unknown error"),
-        ConnectionError::UnsupportedExtension => anyhow!("X11 connection: Unsupported extension"),
-        ConnectionError::MaximumRequestLengthExceeded => {
-            anyhow!("X11 connection: Maximum request length exceeded")
-        }
-        ConnectionError::FdPassingFailed => {
-            panic!("X11 connection: File descriptor passing failed")
-        }
-        ConnectionError::ParseError(parse_error) => {
-            anyhow!(parse_error).context("Parse error in X11 response")
-        }
-        ConnectionError::InsufficientMemory => panic!("X11 connection: Insufficient memory"),
-        ConnectionError::IoError(err) => anyhow!(err).context("X11 connection: IOError"),
-        _ => anyhow!(err),
-    }
-}
-
-pub(crate) fn xcb_flush(xcb: &XCBConnection) {
-    xcb.flush()
-        .map_err(handle_connection_error)
-        .context("X11 flush failed")
-        .log_err();
-}
-
 x11rb::atom_manager! {
     pub XcbAtoms: AtomsCookie {
         XA_ATOM,
