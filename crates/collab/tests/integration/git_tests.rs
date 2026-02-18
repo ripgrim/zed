@@ -1,11 +1,13 @@
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use call::ActiveCall;
 use fs::Fs as _;
 use git::status::{FileStatus, StatusCode, TrackedStatus};
 use git_ui::project_diff::ProjectDiff;
 use gpui::{AppContext as _, BackgroundExecutor, Entity, TestAppContext, VisualTestContext};
-use project::git_store::Repository;
+use parking_lot::Mutex;
+use project::git_store::{Repository, RepositoryEvent};
 use project::{Project, ProjectPath};
 use serde_json::json;
 use util::{path, rel_path::rel_path};
@@ -217,6 +219,18 @@ async fn test_repository_remove_worktree_remote_roundtrip(
         })
         .unwrap();
 
+    // Verify the worktree exists before removing it.
+    let worktrees = cx_b
+        .update(|cx| repo_b.update(cx, |repo, _| repo.worktrees()))
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        worktrees.len(),
+        1,
+        "should have one worktree before removal"
+    );
+
     // Remove the worktree via the remote RPC path.
     cx_b.update(|cx| {
         repo_b.update(cx, |repo, cx| {
@@ -278,6 +292,14 @@ async fn test_repository_rename_worktree_remote_roundtrip(
             });
         })
         .unwrap();
+
+    // Verify the worktree exists before renaming it.
+    let worktrees = cx_b
+        .update(|cx| repo_b.update(cx, |repo, _| repo.worktrees()))
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(worktrees.len(), 1, "should have one worktree before rename");
 
     // Rename the worktree via the remote RPC path.
     cx_b.update(|cx| {
@@ -364,6 +386,166 @@ async fn test_repository_remove_nonexistent_worktree_remote_error(
             );
         })
         .unwrap();
+}
+
+#[gpui::test]
+async fn test_repository_worktree_ops_local(
+    executor: BackgroundExecutor,
+    cx_a: &mut TestAppContext,
+    _cx_b: &mut TestAppContext,
+) {
+    let mut server = TestServer::start(executor.clone()).await;
+    let client = server.create_client(cx_a, "user").await;
+
+    client
+        .fs()
+        .insert_tree(path!("/project"), json!({ ".git": {} }))
+        .await;
+    client
+        .fs()
+        .insert_branches(Path::new(path!("/project/.git")), &["main"]);
+
+    let (project, _) = client.build_local_project(path!("/project"), cx_a).await;
+    executor.run_until_parked();
+
+    let repo = cx_a.update(|cx| project.read(cx).active_repository(cx).unwrap());
+
+    // --- Test remove_worktree locally ---
+
+    // Set up a worktree on disk + in state.
+    client
+        .fs()
+        .create_dir(Path::new("/worktrees/remove-me"))
+        .await
+        .unwrap();
+    client
+        .fs()
+        .with_git_state(Path::new(path!("/project/.git")), false, |state| {
+            state.worktrees.push(git::repository::Worktree {
+                path: PathBuf::from("/worktrees/remove-me"),
+                ref_name: "refs/heads/remove-me".into(),
+                sha: "aaa111".into(),
+            });
+        })
+        .unwrap();
+
+    // Verify it exists.
+    let worktrees = cx_a
+        .update(|cx| repo.update(cx, |repo, _| repo.worktrees()))
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        worktrees.len(),
+        1,
+        "should have one worktree before removal"
+    );
+
+    // Track WorktreesChanged events.
+    let events = Arc::new(Mutex::new(Vec::new()));
+    let subscription = cx_a.update(|cx| {
+        let events = events.clone();
+        cx.subscribe(&repo, move |_, event: &RepositoryEvent, _| {
+            events.lock().push(event.clone());
+        })
+    });
+
+    // Remove the worktree via the local code path.
+    cx_a.update(|cx| {
+        repo.update(cx, |repo, cx| {
+            repo.remove_worktree(PathBuf::from("/worktrees/remove-me"), false, cx)
+        })
+    })
+    .await
+    .unwrap()
+    .unwrap();
+    executor.run_until_parked();
+
+    // Verify removal.
+    let worktrees = cx_a
+        .update(|cx| repo.update(cx, |repo, _| repo.worktrees()))
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(
+        worktrees.is_empty(),
+        "should have no worktrees after removal"
+    );
+
+    // Verify event was emitted.
+    assert!(
+        events
+            .lock()
+            .iter()
+            .any(|e| matches!(e, RepositoryEvent::WorktreesChanged)),
+        "WorktreesChanged event should have been emitted for remove"
+    );
+    events.lock().clear();
+
+    // --- Test rename_worktree locally ---
+
+    // Set up another worktree.
+    client
+        .fs()
+        .create_dir(Path::new("/worktrees/old-name"))
+        .await
+        .unwrap();
+    client
+        .fs()
+        .with_git_state(Path::new(path!("/project/.git")), false, |state| {
+            state.worktrees.push(git::repository::Worktree {
+                path: PathBuf::from("/worktrees/old-name"),
+                ref_name: "refs/heads/old-name".into(),
+                sha: "bbb222".into(),
+            });
+        })
+        .unwrap();
+
+    let worktrees = cx_a
+        .update(|cx| repo.update(cx, |repo, _| repo.worktrees()))
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(worktrees.len(), 1, "should have one worktree before rename");
+
+    // Rename via local code path.
+    cx_a.update(|cx| {
+        repo.update(cx, |repo, cx| {
+            repo.rename_worktree(
+                PathBuf::from("/worktrees/old-name"),
+                PathBuf::from("/worktrees/new-name"),
+                cx,
+            )
+        })
+    })
+    .await
+    .unwrap()
+    .unwrap();
+    executor.run_until_parked();
+
+    // Verify rename.
+    let worktrees = cx_a
+        .update(|cx| repo.update(cx, |repo, _| repo.worktrees()))
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(worktrees.len(), 1, "should still have one worktree");
+    assert_eq!(
+        worktrees[0].path,
+        PathBuf::from("/worktrees/new-name"),
+        "worktree should be renamed"
+    );
+
+    // Verify event was emitted.
+    assert!(
+        events
+            .lock()
+            .iter()
+            .any(|e| matches!(e, RepositoryEvent::WorktreesChanged)),
+        "WorktreesChanged event should have been emitted for rename"
+    );
+
+    drop(subscription);
 }
 
 #[gpui::test]

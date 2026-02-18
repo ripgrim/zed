@@ -52,6 +52,7 @@ pub struct WorktreeList {
     pub picker: Entity<Picker<WorktreeListDelegate>>,
     picker_focus_handle: FocusHandle,
     _subscriptions: Vec<Subscription>,
+    _worktree_refresh_task: Option<Task<()>>,
     embedded: bool,
 }
 
@@ -93,20 +94,26 @@ impl WorktreeList {
             _subscriptions.push(cx.subscribe_in(
                 &repo,
                 window,
-                |_this, repo, event, window, cx| {
+                |worktree_list, repo, event, window, cx| {
                     if matches!(event, RepositoryEvent::WorktreesChanged) {
                         let worktrees_request = repo.update(cx, |repo, _| repo.worktrees());
-                        cx.spawn_in(window, async move |this, cx| {
-                            let worktrees = worktrees_request.await??;
-                            this.update_in(cx, |this, window, cx| {
-                                this.picker.update(cx, |picker, cx| {
-                                    picker.delegate.all_worktrees = Some(worktrees);
-                                    picker.refresh(window, cx);
-                                });
-                            })?;
-                            anyhow::Ok(())
-                        })
-                        .detach_and_log_err(cx);
+                        worktree_list._worktree_refresh_task =
+                            Some(cx.spawn_in(window, async move |this, cx| {
+                                if let Err(error) = async {
+                                    let worktrees = worktrees_request.await??;
+                                    this.update_in(cx, |this, window, cx| {
+                                        this.picker.update(cx, |picker, cx| {
+                                            picker.delegate.all_worktrees = Some(worktrees);
+                                            picker.refresh(window, cx);
+                                        });
+                                    })?;
+                                    anyhow::Ok(())
+                                }
+                                .await
+                                {
+                                    log::error!("{error:#}");
+                                }
+                            }));
                     }
                 },
             ));
@@ -153,6 +160,7 @@ impl WorktreeList {
             picker_focus_handle,
             width,
             _subscriptions,
+            _worktree_refresh_task: None,
             embedded,
         }
     }
