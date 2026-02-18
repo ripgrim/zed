@@ -4,10 +4,10 @@ use std::rc::Rc;
 use calloop::{EventLoop, LoopHandle};
 use util::ResultExt;
 
-use crate::linux::LinuxClient;
+use crate::linux::{LinuxClient, LinuxKeyboardLayout};
 use crate::{
-    AnyWindowHandle, CursorStyle, DisplayId, LinuxCommon, LinuxKeyboardLayout, PlatformDisplay,
-    PlatformKeyboardLayout, PlatformWindow, WindowParams,
+    AnyWindowHandle, CursorStyle, DisplayId, LinuxCommon, PlatformDisplay, PlatformKeyboardLayout,
+    PlatformWindow, WindowParams,
 };
 
 pub struct HeadlessClientState {
@@ -68,7 +68,7 @@ impl LinuxClient for HeadlessClient {
         &self,
     ) -> futures::channel::oneshot::Receiver<anyhow::Result<Vec<Rc<dyn crate::ScreenCaptureSource>>>>
     {
-        let (mut tx, rx) = futures::channel::oneshot::channel();
+        let (tx, rx) = futures::channel::oneshot::channel();
         tx.send(Err(anyhow::anyhow!(
             "Headless mode does not support screen capture."
         )))

@@ -58,7 +58,7 @@ struct LoadedFont {
 impl CosmicTextSystem {
     pub(crate) fn new() -> Self {
         // todo(linux) make font loading non-blocking
-        let mut font_system = FontSystem::new();
+        let font_system = FontSystem::new();
 
         Self(RwLock::new(CosmicTextSystemState {
             font_system,
@@ -261,7 +261,7 @@ impl CosmicTextSystemState {
             loaded_font_ids.push(font_id);
             self.loaded_fonts.push(LoadedFont {
                 font,
-                features: features.try_into()?,
+                features: cosmic_font_features(features)?,
                 is_known_emoji_font: check_is_known_emoji_font(&postscript_name),
             });
         }
@@ -324,7 +324,7 @@ impl CosmicTextSystemState {
     ) -> Result<swash::scale::image::Image> {
         let loaded_font = &self.loaded_fonts[params.font_id.0];
         let font_ref = loaded_font.font.as_swash();
-        let pixel_size = params.font_size.0;
+        let pixel_size = f32::from(params.font_size);
 
         let subpixel_offset = Vector::new(
             params.subpixel_variant.x as f32 / SUBPIXEL_VARIANTS_X as f32 / params.scale_factor,
@@ -428,7 +428,7 @@ impl CosmicTextSystemState {
         let mut layout_lines = Vec::with_capacity(1);
         line.layout_to_buffer(
             &mut self.scratch,
-            font_size.0,
+            f32::from(font_size),
             None, // We do our own wrapping
             cosmic_text::Wrap::None,
             None,
@@ -484,84 +484,64 @@ impl CosmicTextSystemState {
     }
 }
 
-impl TryFrom<&FontFeatures> for CosmicFontFeatures {
-    type Error = anyhow::Error;
+fn cosmic_font_features(features: &FontFeatures) -> Result<CosmicFontFeatures> {
+    let mut result = CosmicFontFeatures::new();
+    for feature in features.0.iter() {
+        let name_bytes: [u8; 4] = feature
+            .0
+            .as_bytes()
+            .try_into()
+            .context("Incorrect feature flag format")?;
 
-    fn try_from(features: &FontFeatures) -> Result<Self> {
-        let mut result = CosmicFontFeatures::new();
-        for feature in features.0.iter() {
-            let name_bytes: [u8; 4] = feature
-                .0
-                .as_bytes()
-                .try_into()
-                .context("Incorrect feature flag format")?;
+        let tag = cosmic_text::FeatureTag::new(&name_bytes);
 
-            let tag = cosmic_text::FeatureTag::new(&name_bytes);
+        result.set(tag, feature.1);
+    }
+    Ok(result)
+}
 
-            result.set(tag, feature.1);
-        }
-        Ok(result)
+fn bounds_f32_from_rect_f(rect: RectF) -> Bounds<f32> {
+    Bounds {
+        origin: point(rect.origin_x(), rect.origin_y()),
+        size: size(rect.width(), rect.height()),
     }
 }
 
-impl From<RectF> for Bounds<f32> {
-    fn from(rect: RectF) -> Self {
-        Bounds {
-            origin: point(rect.origin_x(), rect.origin_y()),
-            size: size(rect.width(), rect.height()),
-        }
+fn device_bounds_from_rect_i(rect: RectI) -> Bounds<DevicePixels> {
+    Bounds {
+        origin: point(DevicePixels(rect.origin_x()), DevicePixels(rect.origin_y())),
+        size: size(DevicePixels(rect.width()), DevicePixels(rect.height())),
     }
 }
 
-impl From<RectI> for Bounds<DevicePixels> {
-    fn from(rect: RectI) -> Self {
-        Bounds {
-            origin: point(DevicePixels(rect.origin_x()), DevicePixels(rect.origin_y())),
-            size: size(DevicePixels(rect.width()), DevicePixels(rect.height())),
-        }
+fn device_size_from_vector2i(value: Vector2I) -> Size<DevicePixels> {
+    size(value.x().into(), value.y().into())
+}
+
+fn int_bounds_from_rect_i(rect: RectI) -> Bounds<i32> {
+    Bounds {
+        origin: point(rect.origin_x(), rect.origin_y()),
+        size: size(rect.width(), rect.height()),
     }
 }
 
-impl From<Vector2I> for Size<DevicePixels> {
-    fn from(value: Vector2I) -> Self {
-        size(value.x().into(), value.y().into())
-    }
+fn vector2i_from_point(point: Point<u32>) -> Vector2I {
+    Vector2I::new(point.x as i32, point.y as i32)
 }
 
-impl From<RectI> for Bounds<i32> {
-    fn from(rect: RectI) -> Self {
-        Bounds {
-            origin: point(rect.origin_x(), rect.origin_y()),
-            size: size(rect.width(), rect.height()),
-        }
-    }
+fn size_f32_from_vector2f(vec: Vector2F) -> Size<f32> {
+    size(vec.x(), vec.y())
 }
 
-impl From<Point<u32>> for Vector2I {
-    fn from(size: Point<u32>) -> Self {
-        Vector2I::new(size.x as i32, size.y as i32)
-    }
+fn cosmic_weight(value: FontWeight) -> cosmic_text::Weight {
+    cosmic_text::Weight(value.0 as u16)
 }
 
-impl From<Vector2F> for Size<f32> {
-    fn from(vec: Vector2F) -> Self {
-        size(vec.x(), vec.y())
-    }
-}
-
-impl From<FontWeight> for cosmic_text::Weight {
-    fn from(value: FontWeight) -> Self {
-        cosmic_text::Weight(value.0 as u16)
-    }
-}
-
-impl From<FontStyle> for cosmic_text::Style {
-    fn from(style: FontStyle) -> Self {
-        match style {
-            FontStyle::Normal => cosmic_text::Style::Normal,
-            FontStyle::Italic => cosmic_text::Style::Italic,
-            FontStyle::Oblique => cosmic_text::Style::Oblique,
-        }
+fn cosmic_style(style: FontStyle) -> cosmic_text::Style {
+    match style {
+        FontStyle::Normal => cosmic_text::Style::Normal,
+        FontStyle::Italic => cosmic_text::Style::Italic,
+        FontStyle::Oblique => cosmic_text::Style::Oblique,
     }
 }
 

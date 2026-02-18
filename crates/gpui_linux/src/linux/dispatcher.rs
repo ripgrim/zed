@@ -39,8 +39,7 @@ impl LinuxDispatcher {
 
         let mut background_threads = (0..thread_count)
             .map(|i| {
-                let mut receiver: PriorityQueueReceiver<RunnableVariant> =
-                    background_receiver.clone();
+                let receiver: PriorityQueueReceiver<RunnableVariant> = background_receiver.clone();
                 std::thread::Builder::new()
                     .name(format!("Worker-{i}"))
                     .spawn(move || {
@@ -304,7 +303,7 @@ impl<T> calloop::EventSource for PriorityQueueCalloopReceiver<T> {
             .process_events(readiness, token, |(), &mut ()| {
                 let mut is_empty = true;
 
-                let mut receiver = self.receiver.clone();
+                let receiver = self.receiver.clone();
                 for runnable in receiver.try_iter() {
                     match runnable {
                         Ok(r) => {

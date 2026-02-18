@@ -1,4 +1,4 @@
-use crate::{Capslock, ResultExt as _, TaskTiming, profiler, xcb_flush};
+use crate::{Capslock, ResultExt as _, TaskTiming, profiler};
 use anyhow::{Context as _, anyhow};
 use ashpd::WindowIdentifier;
 use calloop::{
@@ -45,7 +45,7 @@ use super::{
     XimHandler, button_or_scroll_from_event_detail, check_reply,
     clipboard::{self, Clipboard},
     get_reply, get_valuator_axis_index, handle_connection_error, modifiers_from_state,
-    pressed_button_from_mask,
+    pressed_button_from_mask, xcb_flush,
 };
 
 use crate::linux::{
@@ -55,12 +55,12 @@ use crate::linux::{
     reveal_path_internal,
     xdg_desktop_portal::{Event as XDPEvent, XDPEventSource},
 };
+use crate::linux::{LinuxKeyboardLayout, X11Window, modifiers_from_xinput_info};
 use crate::{
     AnyWindowHandle, Bounds, ClipboardItem, CursorStyle, DisplayId, FileDropEvent, Keystroke,
-    LinuxCommon, LinuxKeyboardLayout, Modifiers, ModifiersChangedEvent, MouseButton, Pixels,
-    Platform, PlatformDisplay, PlatformInput, PlatformKeyboardLayout, PlatformWindow, Point,
-    RequestFrameOptions, ScrollDelta, Size, TouchPhase, WindowParams, X11Window,
-    modifiers_from_xinput_info, point, px,
+    LinuxCommon, Modifiers, ModifiersChangedEvent, MouseButton, Pixels, Platform, PlatformDisplay,
+    PlatformInput, PlatformKeyboardLayout, PlatformWindow, Point, RequestFrameOptions, ScrollDelta,
+    Size, TouchPhase, WindowParams, point, px,
 };
 use gpui_wgpu::WgpuContext;
 
@@ -1471,7 +1471,12 @@ impl LinuxClient for X11Client {
         let state = self.0.borrow();
 
         Some(Rc::new(
-            X11Display::new(&state.xcb_connection, state.scale_factor, id.0 as usize).ok()?,
+            X11Display::new(
+                &state.xcb_connection,
+                state.scale_factor,
+                u32::from(id) as usize,
+            )
+            .ok()?,
         ))
     }
 

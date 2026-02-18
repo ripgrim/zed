@@ -1,12 +1,13 @@
 use anyhow::{Context as _, anyhow};
 use x11rb::connection::RequestConnection;
 
+use crate::linux::X11ClientStatePtr;
 use crate::{
     AnyWindowHandle, Bounds, Decorations, DevicePixels, ForegroundExecutor, GpuSpecs, Modifiers,
     Pixels, PlatformAtlas, PlatformDisplay, PlatformInput, PlatformInputHandler, PlatformWindow,
     Point, PromptButton, PromptLevel, RequestFrameOptions, ResizeEdge, ScaledPixels, Scene, Size,
     Tiling, WindowAppearance, WindowBackgroundAppearance, WindowBounds, WindowControlArea,
-    WindowDecorations, WindowKind, WindowParams, X11ClientStatePtr, px,
+    WindowDecorations, WindowKind, WindowParams, px,
 };
 use gpui_wgpu::{WgpuContext, WgpuRenderer, WgpuSurfaceConfig};
 
@@ -32,6 +33,33 @@ use std::{
 };
 
 use super::{X11Display, XINPUT_ALL_DEVICE_GROUPS, XINPUT_ALL_DEVICES};
+
+/// Convert X11 connection errors to `anyhow::Error` and panic for unrecoverable errors.
+pub(crate) fn handle_connection_error(err: ConnectionError) -> anyhow::Error {
+    match err {
+        ConnectionError::UnknownError => anyhow!("X11 connection: Unknown error"),
+        ConnectionError::UnsupportedExtension => anyhow!("X11 connection: Unsupported extension"),
+        ConnectionError::MaximumRequestLengthExceeded => {
+            anyhow!("X11 connection: Maximum request length exceeded")
+        }
+        ConnectionError::FdPassingFailed => {
+            panic!("X11 connection: File descriptor passing failed")
+        }
+        ConnectionError::ParseError(parse_error) => {
+            anyhow!(parse_error).context("Parse error in X11 response")
+        }
+        ConnectionError::InsufficientMemory => panic!("X11 connection: Insufficient memory"),
+        ConnectionError::IoError(err) => anyhow!(err).context("X11 connection: IOError"),
+        _ => anyhow!(err),
+    }
+}
+
+pub(crate) fn xcb_flush(xcb: &XCBConnection) {
+    xcb.flush()
+        .map_err(handle_connection_error)
+        .context("X11 flush failed")
+        .log_err();
+}
 
 x11rb::atom_manager! {
     pub XcbAtoms: AtomsCookie {
@@ -405,7 +433,7 @@ impl X11WindowState {
     ) -> anyhow::Result<Self> {
         let x_screen_index = params
             .display_id
-            .map_or(x_main_screen_index, |did| did.0 as usize);
+            .map_or(x_main_screen_index, |did| u32::from(did) as usize);
 
         let visual_set = find_visuals(xcb, x_screen_index);
 
@@ -500,7 +528,7 @@ impl X11WindowState {
 
             if let Some(size) = params.window_min_size {
                 let mut size_hints = WmSizeHints::new();
-                let min_size = (size.width.0 as i32, size.height.0 as i32);
+                let min_size = (f32::from(size.width) as i32, f32::from(size.height) as i32);
                 size_hints.min_size = Some(min_size);
                 check_reply(
                     || {
@@ -874,8 +902,8 @@ impl X11Window {
             self.0.xcb.translate_coordinates(
                 self.0.x_window,
                 state.x_root_window,
-                (position.x.0 * state.scale_factor) as i16,
-                (position.y.0 * state.scale_factor) as i16,
+                (f32::from(position.x) * state.scale_factor) as i16,
+                (f32::from(position.y) * state.scale_factor) as i16,
             ),
         )
     }
@@ -1644,7 +1672,7 @@ impl PlatformWindow for X11Window {
     fn set_client_inset(&self, inset: Pixels) {
         let mut state = self.0.state.borrow_mut();
 
-        let dp = (inset.0 * state.scale_factor) as u32;
+        let dp = (f32::from(inset) * state.scale_factor) as u32;
 
         let insets = if state.fullscreen {
             [0, 0, 0, 0]
@@ -1745,7 +1773,7 @@ impl PlatformWindow for X11Window {
     }
 
     fn update_ime_position(&self, bounds: Bounds<Pixels>) {
-        let mut state = self.0.state.borrow_mut();
+        let state = self.0.state.borrow();
         let client = state.client.clone();
         drop(state);
         client.update_ime_position(bounds);

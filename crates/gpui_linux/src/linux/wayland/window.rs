@@ -25,7 +25,7 @@ use wayland_protocols_plasma::blur::client::org_kde_kwin_blur;
 use wayland_protocols_wlr::layer_shell::v1::client::zwlr_layer_surface_v1;
 
 use crate::linux::wayland::{display::WaylandDisplay, serial::SerialKind};
-use crate::{Globals, Output, WaylandClientStatePtr, get_window};
+use crate::linux::{Globals, Output, WaylandClientStatePtr, get_window};
 use gpui::{
     AnyWindowHandle, Bounds, Capslock, Decorations, DevicePixels, GpuSpecs, Modifiers, Pixels,
     PlatformAtlas, PlatformDisplay, PlatformInput, PlatformInputHandler, PlatformWindow, Point,
@@ -139,34 +139,37 @@ impl WaylandSurfaceState {
             let layer_surface = layer_shell.get_layer_surface(
                 &surface,
                 None,
-                options.layer.into(),
+                super::layer_shell::wayland_layer(options.layer),
                 options.namespace.clone(),
                 &globals.qh,
                 surface.id(),
             );
 
-            let width = params.bounds.size.width.0;
-            let height = params.bounds.size.height.0;
+            let width = f32::from(params.bounds.size.width);
+            let height = f32::from(params.bounds.size.height);
             layer_surface.set_size(width as u32, height as u32);
 
-            layer_surface.set_anchor(options.anchor.into());
-            layer_surface.set_keyboard_interactivity(options.keyboard_interactivity.into());
+            layer_surface.set_anchor(super::layer_shell::wayland_anchor(options.anchor));
+            layer_surface.set_keyboard_interactivity(
+                super::layer_shell::wayland_keyboard_interactivity(options.keyboard_interactivity),
+            );
 
             if let Some(margin) = options.margin {
                 layer_surface.set_margin(
-                    margin.0.0 as i32,
-                    margin.1.0 as i32,
-                    margin.2.0 as i32,
-                    margin.3.0 as i32,
+                    f32::from(margin.0) as i32,
+                    f32::from(margin.1) as i32,
+                    f32::from(margin.2) as i32,
+                    f32::from(margin.3) as i32,
                 )
             }
 
             if let Some(exclusive_zone) = options.exclusive_zone {
-                layer_surface.set_exclusive_zone(exclusive_zone.0 as i32);
+                layer_surface.set_exclusive_zone(f32::from(exclusive_zone) as i32);
             }
 
             if let Some(exclusive_edge) = options.exclusive_edge {
-                layer_surface.set_exclusive_edge(exclusive_edge.into());
+                layer_surface
+                    .set_exclusive_edge(super::layer_shell::wayland_anchor(exclusive_edge));
             }
 
             return Ok(WaylandSurfaceState::LayerShell(WaylandLayerSurfaceState {
@@ -203,7 +206,7 @@ impl WaylandSurfaceState {
         };
 
         if let Some(size) = params.window_min_size {
-            toplevel.set_min_size(size.width.0 as i32, size.height.0 as i32);
+            toplevel.set_min_size(f32::from(size.width) as i32, f32::from(size.height) as i32);
         }
 
         // Attempt to set up window decorations based on the requested configuration
@@ -330,8 +333,8 @@ impl WaylandWindowState {
             };
             let config = WgpuSurfaceConfig {
                 size: Size {
-                    width: DevicePixels(options.bounds.size.width.0 as i32),
-                    height: DevicePixels(options.bounds.size.height.0 as i32),
+                    width: DevicePixels(f32::from(options.bounds.size.width) as i32),
+                    height: DevicePixels(f32::from(options.bounds.size.height) as i32),
                 },
                 transparent: true,
             };
@@ -613,7 +616,7 @@ impl WaylandWindowStatePtr {
                 state.inset(),
                 state.tiling,
             )
-            .map(|v| v.0 as i32)
+            .map(|v| f32::from(v) as i32)
             .map_size(|v| if v <= 0 { 1 } else { v });
 
             state.surface_state.set_geometry(
@@ -637,7 +640,7 @@ impl WaylandWindowStatePtr {
             match mode {
                 WEnum::Value(zxdg_toplevel_decoration_v1::Mode::ServerSide) => {
                     self.state.borrow_mut().decorations = WindowDecorations::Server;
-                    if let Some(mut appearance_changed) =
+                    if let Some(appearance_changed) =
                         self.callbacks.borrow_mut().appearance_changed.as_mut()
                     {
                         appearance_changed();
@@ -646,7 +649,7 @@ impl WaylandWindowStatePtr {
                 WEnum::Value(zxdg_toplevel_decoration_v1::Mode::ClientSide) => {
                     self.state.borrow_mut().decorations = WindowDecorations::Client;
                     // Update background to be transparent
-                    if let Some(mut appearance_changed) =
+                    if let Some(appearance_changed) =
                         self.callbacks.borrow_mut().appearance_changed.as_mut()
                     {
                         appearance_changed();
@@ -675,7 +678,7 @@ impl WaylandWindowStatePtr {
                 height,
                 states,
             } => {
-                let mut size = if width == 0 || height == 0 {
+                let size = if width == 0 || height == 0 {
                     None
                 } else {
                     Some(size(px(width as f32), px(height as f32)))
@@ -782,7 +785,7 @@ impl WaylandWindowStatePtr {
                 height,
                 serial,
             } => {
-                let mut size = if width == 0 || height == 0 {
+                let size = if width == 0 || height == 0 {
                     None
                 } else {
                     Some(size(px(width as f32), px(height as f32)))
@@ -928,7 +931,8 @@ impl WaylandWindowStatePtr {
         {
             let state = self.state.borrow();
             if let Some(viewport) = &state.viewport {
-                viewport.set_destination(size.width.0 as i32, size.height.0 as i32);
+                viewport
+                    .set_destination(f32::from(size.width) as i32, f32::from(size.height) as i32);
             }
         }
     }
@@ -1103,7 +1107,7 @@ impl PlatformWindow for WaylandWindow {
             state.inset(),
             state.tiling,
         )
-        .map(|v| v.0 as i32)
+        .map(|v| f32::from(v) as i32)
         .map_size(|v| if v <= 0 { 1 } else { v });
 
         state.surface_state.set_geometry(
@@ -1247,7 +1251,7 @@ impl PlatformWindow for WaylandWindow {
     }
 
     fn toggle_fullscreen(&self) {
-        let mut state = self.borrow();
+        let state = self.borrow();
         if let Some(toplevel) = state.surface_state.toplevel() {
             if !state.fullscreen {
                 toplevel.set_fullscreen(None);
@@ -1322,8 +1326,8 @@ impl PlatformWindow for WaylandWindow {
             toplevel.show_window_menu(
                 &state.globals.seat,
                 serial,
-                position.x.0 as i32,
-                position.y.0 as i32,
+                f32::from(position.x) as i32,
+                f32::from(position.y) as i32,
             );
         }
     }
@@ -1403,8 +1407,8 @@ fn update_window(mut state: RefMut<WaylandWindowState>) {
     let opaque = !state.is_transparent();
 
     state.renderer.update_transparency(!opaque);
-    let mut opaque_area = state.window_bounds.map(|v| v.0 as i32);
-    opaque_area.inset(state.inset().0 as i32);
+    let mut opaque_area = state.window_bounds.map(|v| f32::from(v) as i32);
+    opaque_area.inset(f32::from(state.inset()) as i32);
 
     let region = state
         .globals
@@ -1449,7 +1453,11 @@ fn update_window(mut state: RefMut<WaylandWindowState>) {
     region.destroy();
 }
 
-impl WindowDecorations {
+pub(crate) trait WindowDecorationsExt {
+    fn to_xdg(self) -> zxdg_toplevel_decoration_v1::Mode;
+}
+
+impl WindowDecorationsExt for WindowDecorations {
     fn to_xdg(self) -> zxdg_toplevel_decoration_v1::Mode {
         match self {
             WindowDecorations::Client => zxdg_toplevel_decoration_v1::Mode::ClientSide,
@@ -1458,7 +1466,11 @@ impl WindowDecorations {
     }
 }
 
-impl ResizeEdge {
+pub(crate) trait ResizeEdgeWaylandExt {
+    fn to_xdg(self) -> xdg_toplevel::ResizeEdge;
+}
+
+impl ResizeEdgeWaylandExt for ResizeEdge {
     fn to_xdg(self) -> xdg_toplevel::ResizeEdge {
         match self {
             ResizeEdge::Top => xdg_toplevel::ResizeEdge::Top,

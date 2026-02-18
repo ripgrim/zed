@@ -311,10 +311,10 @@ impl WaylandClientStatePtr {
             drop(state);
             if let Some(area) = window.get_ime_area() {
                 text_input.set_cursor_rectangle(
-                    area.origin.x.0 as i32,
-                    area.origin.y.0 as i32,
-                    area.size.width.0 as i32,
-                    area.size.height.0 as i32,
+                    f32::from(area.origin.x) as i32,
+                    f32::from(area.origin.y) as i32,
+                    f32::from(area.size.width) as i32,
+                    f32::from(area.size.height) as i32,
                 );
             }
             state = client.borrow_mut();
@@ -335,7 +335,7 @@ impl WaylandClientStatePtr {
 
     pub fn update_ime_position(&self, bounds: Bounds<Pixels>) {
         let client = self.get_client();
-        let mut state = client.borrow_mut();
+        let state = client.borrow_mut();
         if state.composing || state.text_input.is_none() || state.pre_edit_text.is_some() {
             return;
         }
@@ -380,7 +380,7 @@ impl WaylandClientStatePtr {
     }
 
     pub fn drop_window(&self, surface_id: &ObjectId) {
-        let mut client = self.get_client();
+        let client = self.get_client();
         let mut state = client.borrow_mut();
         let closed_window = state.windows.remove(surface_id).unwrap();
         if let Some(window) = state.mouse_focused_window.take()
@@ -912,7 +912,7 @@ impl Dispatch<wl_registry::WlRegistry, GlobalListContents> for WaylandClientStat
         _: &Connection,
         qh: &QueueHandle<Self>,
     ) {
-        let mut client = this.get_client();
+        let client = this.get_client();
         let mut state = client.borrow_mut();
 
         match event {
@@ -1000,7 +1000,7 @@ impl Dispatch<WlCallback, ObjectId> for WaylandClientStatePtr {
 }
 
 pub(crate) fn get_window(
-    mut state: &mut RefMut<WaylandClientState>,
+    state: &mut RefMut<WaylandClientState>,
     surface_id: &ObjectId,
 ) -> Option<WaylandWindowStatePtr> {
     state.windows.get(surface_id).cloned()
@@ -1038,10 +1038,10 @@ impl Dispatch<wl_output::WlOutput, ()> for WaylandClientStatePtr {
         _: &Connection,
         _: &QueueHandle<Self>,
     ) {
-        let mut client = this.get_client();
+        let client = this.get_client();
         let mut state = client.borrow_mut();
 
-        let Some(mut in_progress_output) = state.in_progress_outputs.get_mut(&output.id()) else {
+        let Some(in_progress_output) = state.in_progress_outputs.get_mut(&output.id()) else {
             return;
         };
 
@@ -1536,10 +1536,10 @@ impl Dispatch<zwp_text_input_v3::ZwpTextInputV3, ()> for WaylandClientStatePtr {
                     window.handle_ime(ImeInput::SetMarkedText(text));
                     if let Some(area) = window.get_ime_area() {
                         text_input.set_cursor_rectangle(
-                            area.origin.x.0 as i32,
-                            area.origin.y.0 as i32,
-                            area.size.width.0 as i32,
-                            area.size.height.0 as i32,
+                            f32::from(area.origin.x) as i32,
+                            f32::from(area.origin.y) as i32,
+                            f32::from(area.size.width) as i32,
+                            f32::from(area.size.height) as i32,
                         );
                         if last_serial == serial {
                             text_input.commit();
@@ -2149,7 +2149,7 @@ impl Dispatch<wl_data_source::WlDataSource, ()> for WaylandClientStatePtr {
         _: &QueueHandle<Self>,
     ) {
         let client = this.get_client();
-        let mut state = client.borrow_mut();
+        let state = client.borrow_mut();
 
         match event {
             wl_data_source::Event::Send { mime_type, fd } => {
@@ -2235,7 +2235,7 @@ impl Dispatch<zwp_primary_selection_source_v1::ZwpPrimarySelectionSourceV1, ()>
         _: &QueueHandle<Self>,
     ) {
         let client = this.get_client();
-        let mut state = client.borrow_mut();
+        let state = client.borrow_mut();
 
         match event {
             zwp_primary_selection_source_v1::Event::Send { mime_type, fd } => {
