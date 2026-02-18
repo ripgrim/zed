@@ -7,7 +7,7 @@ use git::{
 };
 use gpui::{
     AnyElement, App, ClickEvent, FontWeight, Hsla, InteractiveElement, IntoElement, ParentElement,
-    ScrollHandle, SharedString, Styled, Window,
+    SharedString, Styled, Window, px,
 };
 use project::git_store::Repository;
 use std::sync::Arc;
@@ -66,7 +66,6 @@ pub struct CommitDetailsSidebar {
     changed_files: Vec<(RepoPath, FileStatus)>,
     on_close: Option<Box<dyn Fn(&mut Window, &mut App) + 'static>>,
     on_file_click: Option<Arc<dyn Fn(&RepoPath, &ClickEvent, &mut Window, &mut App) + 'static>>,
-    commit_details_scroll_handle: ScrollHandle,
 }
 
 impl CommitDetailsSidebar {
@@ -77,7 +76,6 @@ impl CommitDetailsSidebar {
             changed_files: Vec::new(),
             on_close: None,
             on_file_click: None,
-            commit_details_scroll_handle: ScrollHandle::new(),
         }
     }
 
@@ -159,7 +157,7 @@ impl CommitDetailsSidebar {
         let on_file_click = self.on_file_click;
         let changed_files = self.changed_files;
 
-        v_flex() // Sidebar
+        v_flex()
             .w(px(300.))
             .h_full()
             .border_l_1()
@@ -167,209 +165,218 @@ impl CommitDetailsSidebar {
             .bg(cx.theme().colors().surface_background)
             // Commit Details
             .child(
-                v_flex()
+                div()
                     .id("commit-details")
-                    .flex_1()
-                    .min_h_0()
-                    .overflow_y_scroll()
-                    .track_scroll(&self.commit_details_scroll_handle)
-                    .p_3()
                     .child(
-                        h_flex()
-                            .w_full()
-                            .justify_between()
-                            .child(div().flex_1())
-                            .child(avatar_element)
-                            .child(div().flex_1().justify_end().when_some(
-                                on_close,
-                                |this, on_close| {
-                                    this.child(
-                                        h_flex().justify_end().child(
+                        v_flex()
+                            .p_3()
+                            .gap_3()
+                            .child(
+                                h_flex()
+                                    .w_full()
+                                    .items_start()
+                                    .justify_between()
+                                    .child(avatar_element)
+                                    .when_some(on_close, |this, on_close| {
+                                        this.child(
                                             IconButton::new("close-detail", IconName::Close)
                                                 .icon_size(IconSize::Small)
                                                 .on_click(move |_, window, cx| {
                                                     on_close(window, cx);
                                                 }),
-                                        ),
-                                    )
-                                },
-                            )),
-                    )
-                    .child(
-                        v_flex()
-                            .gap_0p5()
-                            .items_center()
-                            .child(Label::new(author_name.clone()).weight(FontWeight::SEMIBOLD))
-                            .child(
-                                Label::new(date_string)
-                                    .color(Color::Muted)
-                                    .size(LabelSize::Small),
-                            ),
-                    )
-                    .when(!ref_names.is_empty(), |this| {
-                        this.child(
-                            h_flex().justify_center().gap_1().flex_wrap().children(
-                                ref_names.iter().map(|name| {
-                                    render_badge(name, accent_color).into_any_element()
-                                }),
-                            ),
-                        )
-                    })
-                    .child(
-                        v_flex()
-                            .gap_1p5()
-                            .child(
-                                h_flex()
-                                    .gap_1()
-                                    .child(
-                                        Icon::new(IconName::Person)
-                                            .size(IconSize::Small)
-                                            .color(Color::Muted),
-                                    )
-                                    .child(
-                                        Label::new(author_name)
-                                            .size(LabelSize::Small)
-                                            .color(Color::Muted),
-                                    )
-                                    .when(!author_email.is_empty(), |this| {
-                                        this.child(
-                                            Label::new(format!("<{}>", author_email))
-                                                .size(LabelSize::Small)
-                                                .color(Color::Ignored),
                                         )
                                     }),
                             )
-                            .child(
-                                h_flex()
-                                    .gap_1()
-                                    .child(
-                                        Icon::new(IconName::Hash)
-                                            .size(IconSize::Small)
-                                            .color(Color::Muted),
-                                    )
-                                    .child(
-                                        Label::new(full_sha.clone())
-                                            .size(LabelSize::Small)
-                                            .color(Color::Muted),
-                                    )
-                                    .child(
-                                        CopyButton::new("copy-sha", full_sha.to_string())
-                                            .tooltip_label("Copy SHA"),
-                                    ),
-                            )
-                            .when_some(remote, |this, remote| {
-                                let provider_name = remote.host.name();
-                                let icon = match provider_name.as_str() {
-                                    "GitHub" => IconName::Github,
-                                    _ => IconName::Link,
-                                };
-                                let parsed_remote = ParsedGitRemote {
-                                    owner: remote.owner.as_ref().into(),
-                                    repo: remote.repo.as_ref().into(),
-                                };
-                                let params = BuildCommitPermalinkParams {
-                                    sha: full_sha.as_ref(),
-                                };
-                                let url = remote
-                                    .host
-                                    .build_commit_permalink(&parsed_remote, params)
-                                    .to_string();
-                                this.child(
-                                    h_flex()
-                                        .gap_1()
-                                        .child(
-                                            Icon::new(icon)
-                                                .size(IconSize::Small)
-                                                .color(Color::Muted),
-                                        )
-                                        .child(
-                                            Button::new(
-                                                "view-on-provider",
-                                                format!("View on {}", provider_name),
-                                            )
-                                            .style(ButtonStyle::Transparent)
-                                            .label_size(LabelSize::Small)
-                                            .color(Color::Muted)
-                                            .on_click(
-                                                move |_, _, cx| {
-                                                    cx.open_url(&url);
-                                                },
-                                            ),
-                                        ),
-                                )
-                            }),
-                    )
-                    .child(
-                        div()
-                            .border_t_1()
-                            .border_color(cx.theme().colors().border)
-                            .p_3()
-                            .min_w_0()
                             .child(
                                 v_flex()
-                                    .gap_2()
-                                    .child(Label::new(subject).weight(FontWeight::MEDIUM))
-                                    .when(!body.is_empty(), |this| {
+                                    .gap_0p5()
+                                    .child(
+                                        Label::new(author_name.clone())
+                                            .weight(FontWeight::SEMIBOLD),
+                                    )
+                                    .child(
+                                        Label::new(date_string)
+                                            .color(Color::Muted)
+                                            .size(LabelSize::Small),
+                                    ),
+                            )
+                            .when(!ref_names.is_empty(), |this| {
+                                this.child(h_flex().pt_1().gap_1().flex_wrap().children(
+                                    ref_names.iter().map(|name| {
+                                        render_badge(name, accent_color).into_any_element()
+                                    }),
+                                ))
+                            })
+                            .child(
+                                v_flex()
+                                    .gap_1p5()
+                                    .child(
+                                        h_flex()
+                                            .gap_1()
+                                            .child(
+                                                Icon::new(IconName::Person)
+                                                    .size(IconSize::Small)
+                                                    .color(Color::Muted),
+                                            )
+                                            .child(
+                                                Label::new(author_name)
+                                                    .size(LabelSize::Small)
+                                                    .color(Color::Muted),
+                                            )
+                                            .when(!author_email.is_empty(), |this| {
+                                                this.child(
+                                                    Label::new(format!("<{}>", author_email))
+                                                        .size(LabelSize::Small)
+                                                        .color(Color::Ignored),
+                                                )
+                                            }),
+                                    )
+                                    .child(
+                                        h_flex()
+                                            .gap_1()
+                                            .child(
+                                                Icon::new(IconName::Hash)
+                                                    .size(IconSize::Small)
+                                                    .color(Color::Muted),
+                                            )
+                                            .child(
+                                                Label::new(full_sha.clone())
+                                                    .size(LabelSize::Small)
+                                                    .color(Color::Muted),
+                                            )
+                                            .child(
+                                                CopyButton::new("copy-sha", full_sha.to_string())
+                                                    .tooltip_label("Copy SHA"),
+                                            ),
+                                    )
+                                    .when_some(remote, |this, remote| {
+                                        let provider_name = remote.host.name();
+                                        let icon = match provider_name.as_str() {
+                                            "GitHub" => IconName::Github,
+                                            _ => IconName::Link,
+                                        };
+                                        let parsed_remote = ParsedGitRemote {
+                                            owner: remote.owner.as_ref().into(),
+                                            repo: remote.repo.as_ref().into(),
+                                        };
+                                        let params = BuildCommitPermalinkParams {
+                                            sha: full_sha.as_ref(),
+                                        };
+                                        let url = remote
+                                            .host
+                                            .build_commit_permalink(&parsed_remote, params)
+                                            .to_string();
                                         this.child(
-                                            Label::new(body)
-                                                .size(LabelSize::Small)
-                                                .color(Color::Muted),
+                                            h_flex()
+                                                .gap_1()
+                                                .child(
+                                                    Icon::new(icon)
+                                                        .size(IconSize::Small)
+                                                        .color(Color::Muted),
+                                                )
+                                                .child(
+                                                    Button::new(
+                                                        "view-on-provider",
+                                                        format!("View on {}", provider_name),
+                                                    )
+                                                    .style(ButtonStyle::Transparent)
+                                                    .label_size(LabelSize::Small)
+                                                    .color(Color::Muted)
+                                                    .on_click(move |_, _, cx| {
+                                                        cx.open_url(&url);
+                                                    }),
+                                                ),
                                         )
                                     }),
+                            )
+                            .child(
+                                div()
+                                    .border_t_1()
+                                    .border_color(cx.theme().colors().border)
+                                    .p_3()
+                                    .min_w_0()
+                                    .child(
+                                        v_flex()
+                                            .gap_2()
+                                            .child(Label::new(subject).weight(FontWeight::MEDIUM))
+                                            .when(!body.is_empty(), |this| {
+                                                this.child(
+                                                    Label::new(body)
+                                                        .size(LabelSize::Small)
+                                                        .color(Color::Muted),
+                                                )
+                                            }),
+                                    ),
                             ),
-                    ),
+                    )
+                    .h_1_2()
+                    .overflow_y_scroll(),
             )
             // Changes list
             .child(
-                v_flex()
+                div()
+                    .border_t_1()
                     .id("changed-files")
-                    .flex_1()
-                    .min_h_0()
-                    .overflow_y_scroll()
-                    .p_3()
-                    .gap_2()
                     .child(
-                        Label::new(format!("{} Changed Files", changed_files_count))
-                            .size(LabelSize::Small)
-                            .color(Color::Muted),
+                        v_flex()
+                            .p_3()
+                            .gap_2()
+                            .child(
+                                Label::new(format!("{} Changed Files", changed_files_count))
+                                    .size(LabelSize::Small)
+                                    .color(Color::Muted),
+                            )
+                            .when(!changed_files.is_empty(), |this| {
+                                this.child(v_flex().gap_1().children(changed_files.iter().map(
+                                    |(path, status)| {
+                                        let file_name: String = path
+                                            .file_name()
+                                            .map(|n| n.to_string())
+                                            .unwrap_or_default();
+                                        let dir_path: String = path
+                                            .parent()
+                                            .map(|p| p.as_unix_str().to_string())
+                                            .unwrap_or_default();
+
+                                        let on_file_click = on_file_click.clone();
+                                        let path_for_click = path.clone();
+
+                                        h_flex()
+                                            .id(SharedString::from(path.as_unix_str().to_string()))
+                                            .gap_1()
+                                            .overflow_hidden()
+                                            .child(git_status_icon(*status))
+                                            .child(
+                                                Label::new(file_name)
+                                                    .size(LabelSize::Small)
+                                                    .single_line(),
+                                            )
+                                            .when(!dir_path.is_empty(), |this| {
+                                                this.child(
+                                                    Label::new(dir_path)
+                                                        .size(LabelSize::Small)
+                                                        .color(Color::Muted)
+                                                        .single_line(),
+                                                )
+                                            })
+                                            .when_some(on_file_click, |this, callback| {
+                                                this.cursor_pointer().on_click(
+                                                    move |event, window, cx| {
+                                                        callback(
+                                                            &path_for_click,
+                                                            event,
+                                                            window,
+                                                            cx,
+                                                        );
+                                                    },
+                                                )
+                                            })
+                                    },
+                                )))
+                            }),
                     )
-                    .when(!changed_files.is_empty(), |this| {
-                        this.child(v_flex().gap_1().children(changed_files.iter().map(
-                            |(path, status)| {
-                                let file_name: String =
-                                    path.file_name().map(|n| n.to_string()).unwrap_or_default();
-                                let dir_path: String = path
-                                    .parent()
-                                    .map(|p| p.as_unix_str().to_string())
-                                    .unwrap_or_default();
-
-                                let on_file_click = on_file_click.clone();
-                                let path_for_click = path.clone();
-
-                                h_flex()
-                                    .id(SharedString::from(path.as_unix_str().to_string()))
-                                    .gap_1()
-                                    .overflow_hidden()
-                                    .child(git_status_icon(*status))
-                                    .child(
-                                        Label::new(file_name).size(LabelSize::Small).single_line(),
-                                    )
-                                    .when(!dir_path.is_empty(), |this| {
-                                        this.child(
-                                            Label::new(dir_path)
-                                                .size(LabelSize::Small)
-                                                .color(Color::Muted)
-                                                .single_line(),
-                                        )
-                                    })
-                                    .when_some(on_file_click, |this, callback| {
-                                        this.cursor_pointer().on_click(move |event, window, cx| {
-                                            callback(&path_for_click, event, window, cx);
-                                        })
-                                    })
-                            },
-                        )))
-                    }),
+                    .h_1_2()
+                    .overflow_y_scroll(),
             )
             .into_any_element()
     }
