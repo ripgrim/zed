@@ -2293,6 +2293,10 @@ impl GitStore {
             !directory.as_os_str().is_empty(),
             "worktree directory path must not be empty"
         );
+        anyhow::ensure!(
+            directory.is_absolute(),
+            "worktree directory path must be absolute"
+        );
         let name = envelope.payload.name;
         anyhow::ensure!(!name.is_empty(), "worktree name must not be empty");
         let commit = envelope.payload.commit;
@@ -2318,6 +2322,7 @@ impl GitStore {
             !path.as_os_str().is_empty(),
             "worktree path must not be empty"
         );
+        anyhow::ensure!(path.is_absolute(), "worktree path must be absolute");
         let force = envelope.payload.force;
 
         repository_handle
@@ -2341,11 +2346,13 @@ impl GitStore {
             !old_path.as_os_str().is_empty(),
             "worktree old_path must not be empty"
         );
+        anyhow::ensure!(old_path.is_absolute(), "worktree old_path must be absolute");
         let new_path = PathBuf::from(envelope.payload.new_path);
         anyhow::ensure!(
             !new_path.as_os_str().is_empty(),
             "worktree new_path must not be empty"
         );
+        anyhow::ensure!(new_path.is_absolute(), "worktree new_path must be absolute");
 
         repository_handle
             .update(&mut cx, |repository_handle, cx| {
