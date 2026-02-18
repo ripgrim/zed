@@ -142,6 +142,8 @@ pub struct EditPredictionStore {
     reject_predictions_tx: mpsc::UnboundedSender<EditPredictionRejection>,
     shown_predictions: VecDeque<EditPrediction>,
     rated_predictions: HashSet<EditPredictionId>,
+    #[cfg(test)]
+    throttle_timeout_override: Option<Duration>,
 }
 
 #[derive(Copy, Clone, Default, PartialEq, Eq)]
@@ -309,7 +311,8 @@ struct ProjectState {
     next_pending_prediction_id: usize,
     pending_predictions: ArrayVec<PendingPrediction, 2>,
     debug_tx: Option<mpsc::UnboundedSender<DebugEvent>>,
-    last_prediction_refresh: Option<(EntityId, Instant)>,
+    last_edit_prediction_refresh: Option<(EntityId, Instant)>,
+    last_jump_prediction_refresh: Option<(EntityId, Instant)>,
     cancelled_predictions: HashSet<usize>,
     context: Entity<RelatedExcerptStore>,
     license_detection_watchers: HashMap<WorktreeId, Rc<LicenseDetectionWatcher>>,
@@ -441,6 +444,12 @@ impl PredictionRequestedBy {
             PredictionRequestedBy::Buffer(buffer_id) => Some(*buffer_id),
         }
     }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+enum PredictionThrottleKind {
+    Edit,
+    Jump,
 }
 
 #[derive(Debug)]
@@ -693,6 +702,8 @@ impl EditPredictionStore {
             reject_predictions_tx: reject_tx,
             rated_predictions: Default::default(),
             shown_predictions: Default::default(),
+            #[cfg(test)]
+            throttle_timeout_override: None,
         };
 
         this
@@ -715,6 +726,22 @@ impl EditPredictionStore {
 
     pub fn zeta2_raw_config(&self) -> Option<&Zeta2RawConfig> {
         self.zeta2_raw_config.as_ref()
+    }
+
+    #[cfg(test)]
+    pub fn set_throttle_timeout_override(&mut self, duration: Duration) {
+        self.throttle_timeout_override = Some(duration);
+    }
+
+    #[cfg(test)]
+    fn throttle_timeout(&self) -> Duration {
+        self.throttle_timeout_override
+            .unwrap_or(Self::THROTTLE_TIMEOUT)
+    }
+
+    #[cfg(not(test))]
+    fn throttle_timeout(&self) -> Duration {
+        Self::THROTTLE_TIMEOUT
     }
 
     pub fn icons(&self) -> edit_prediction_types::EditPredictionIconSet {
@@ -898,7 +925,8 @@ impl EditPredictionStore {
                 cancelled_predictions: HashSet::default(),
                 pending_predictions: ArrayVec::new(),
                 next_pending_prediction_id: 0,
-                last_prediction_refresh: None,
+                last_edit_prediction_refresh: None,
+                last_jump_prediction_refresh: None,
                 license_detection_watchers: HashMap::default(),
                 user_actions: VecDeque::with_capacity(USER_ACTION_HISTORY_SIZE),
                 _subscriptions: [
@@ -1457,33 +1485,39 @@ impl EditPredictionStore {
         position: language::Anchor,
         cx: &mut Context<Self>,
     ) {
-        self.queue_prediction_refresh(project.clone(), buffer.entity_id(), cx, move |this, cx| {
-            let Some(request_task) = this
-                .update(cx, |this, cx| {
-                    this.request_prediction(
-                        &project,
-                        &buffer,
-                        position,
-                        PredictEditsRequestTrigger::Other,
-                        cx,
-                    )
-                })
-                .log_err()
-            else {
-                return Task::ready(anyhow::Ok(None));
-            };
-
-            cx.spawn(async move |_cx| {
-                request_task.await.map(|prediction_result| {
-                    prediction_result.map(|prediction_result| {
-                        (
-                            prediction_result,
-                            PredictionRequestedBy::Buffer(buffer.entity_id()),
+        self.queue_prediction_refresh(
+            project.clone(),
+            PredictionThrottleKind::Edit,
+            buffer.entity_id(),
+            cx,
+            move |this, cx| {
+                let Some(request_task) = this
+                    .update(cx, |this, cx| {
+                        this.request_prediction(
+                            &project,
+                            &buffer,
+                            position,
+                            PredictEditsRequestTrigger::Other,
+                            cx,
                         )
                     })
+                    .log_err()
+                else {
+                    return Task::ready(anyhow::Ok(None));
+                };
+
+                cx.spawn(async move |_cx| {
+                    request_task.await.map(|prediction_result| {
+                        prediction_result.map(|prediction_result| {
+                            (
+                                prediction_result,
+                                PredictionRequestedBy::Buffer(buffer.entity_id()),
+                            )
+                        })
+                    })
                 })
-            })
-        })
+            },
+        )
     }
 
     pub fn refresh_prediction_from_diagnostics(
@@ -1500,77 +1534,83 @@ impl EditPredictionStore {
             return;
         };
 
-        self.queue_prediction_refresh(project.clone(), project.entity_id(), cx, move |this, cx| {
-            let Some((active_buffer, snapshot, cursor_point)) = this
-                .read_with(cx, |this, cx| {
-                    let project_state = this.projects.get(&project.entity_id())?;
-                    let (buffer, position) = project_state.active_buffer(&project, cx)?;
-                    let snapshot = buffer.read(cx).snapshot();
+        self.queue_prediction_refresh(
+            project.clone(),
+            PredictionThrottleKind::Jump,
+            project.entity_id(),
+            cx,
+            move |this, cx| {
+                let Some((active_buffer, snapshot, cursor_point)) = this
+                    .read_with(cx, |this, cx| {
+                        let project_state = this.projects.get(&project.entity_id())?;
+                        let (buffer, position) = project_state.active_buffer(&project, cx)?;
+                        let snapshot = buffer.read(cx).snapshot();
 
-                    if !Self::predictions_enabled_at(&snapshot, position, cx) {
-                        return None;
-                    }
+                        if !Self::predictions_enabled_at(&snapshot, position, cx) {
+                            return None;
+                        }
 
-                    let cursor_point = position
-                        .map(|pos| pos.to_point(&snapshot))
-                        .unwrap_or_default();
+                        let cursor_point = position
+                            .map(|pos| pos.to_point(&snapshot))
+                            .unwrap_or_default();
 
-                    Some((buffer, snapshot, cursor_point))
-                })
-                .log_err()
-                .flatten()
-            else {
-                return Task::ready(anyhow::Ok(None));
-            };
-
-            cx.spawn(async move |cx| {
-                let Some((jump_buffer, jump_position)) = Self::next_diagnostic_location(
-                    active_buffer,
-                    &snapshot,
-                    Default::default(),
-                    cursor_point,
-                    &project,
-                    cx,
-                )
-                .await?
+                        Some((buffer, snapshot, cursor_point))
+                    })
+                    .log_err()
+                    .flatten()
                 else {
-                    return anyhow::Ok(None);
+                    return Task::ready(anyhow::Ok(None));
                 };
 
-                let Some(prediction_result) = this
-                    .update(cx, |this, cx| {
-                        this.request_prediction(
-                            &project,
-                            &jump_buffer,
-                            jump_position,
-                            PredictEditsRequestTrigger::Diagnostics,
-                            cx,
-                        )
-                    })?
+                cx.spawn(async move |cx| {
+                    let Some((jump_buffer, jump_position)) = Self::next_diagnostic_location(
+                        active_buffer,
+                        &snapshot,
+                        Default::default(),
+                        cursor_point,
+                        &project,
+                        cx,
+                    )
                     .await?
-                else {
-                    return anyhow::Ok(None);
-                };
+                    else {
+                        return anyhow::Ok(None);
+                    };
 
-                this.update(cx, |this, cx| {
-                    Some((
-                        if this
-                            .get_or_init_project(&project, cx)
-                            .current_prediction
-                            .is_none()
-                        {
-                            prediction_result
-                        } else {
-                            EditPredictionResult {
-                                id: prediction_result.id,
-                                prediction: Err(EditPredictionRejectReason::CurrentPreferred),
-                            }
-                        },
-                        PredictionRequestedBy::DiagnosticsUpdate,
-                    ))
+                    let Some(prediction_result) = this
+                        .update(cx, |this, cx| {
+                            this.request_prediction(
+                                &project,
+                                &jump_buffer,
+                                jump_position,
+                                PredictEditsRequestTrigger::Diagnostics,
+                                cx,
+                            )
+                        })?
+                        .await?
+                    else {
+                        return anyhow::Ok(None);
+                    };
+
+                    this.update(cx, |this, cx| {
+                        Some((
+                            if this
+                                .get_or_init_project(&project, cx)
+                                .current_prediction
+                                .is_none()
+                            {
+                                prediction_result
+                            } else {
+                                EditPredictionResult {
+                                    id: prediction_result.id,
+                                    prediction: Err(EditPredictionRejectReason::CurrentPreferred),
+                                }
+                            },
+                            PredictionRequestedBy::DiagnosticsUpdate,
+                        ))
+                    })
                 })
-            })
-        });
+            },
+        );
     }
 
     fn predictions_enabled_at(
@@ -1612,6 +1652,7 @@ impl EditPredictionStore {
     fn queue_prediction_refresh(
         &mut self,
         project: Entity<Project>,
+        throttle_kind: PredictionThrottleKind,
         throttle_entity: EntityId,
         cx: &mut Context<Self>,
         do_refresh: impl FnOnce(
@@ -1624,16 +1665,20 @@ impl EditPredictionStore {
         let is_ollama = self.edit_prediction_model == EditPredictionModel::Ollama;
         let drop_on_cancel = is_ollama;
         let max_pending_predictions = if is_ollama { 1 } else { 2 };
+        let throttle_timeout = self.throttle_timeout();
         let project_state = self.get_or_init_project(&project, cx);
         let pending_prediction_id = project_state.next_pending_prediction_id;
         project_state.next_pending_prediction_id += 1;
-        let last_request = project_state.last_prediction_refresh;
+        let last_request = match throttle_kind {
+            PredictionThrottleKind::Edit => project_state.last_edit_prediction_refresh,
+            PredictionThrottleKind::Jump => project_state.last_jump_prediction_refresh,
+        };
 
         let task = cx.spawn(async move |this, cx| {
             if let Some((last_entity, last_timestamp)) = last_request
                 && throttle_entity == last_entity
                 && let Some(timeout) =
-                    (last_timestamp + Self::THROTTLE_TIMEOUT).checked_duration_since(Instant::now())
+                    (last_timestamp + throttle_timeout).checked_duration_since(Instant::now())
             {
                 cx.background_executor().timer(timeout).await;
             }
@@ -1647,7 +1692,15 @@ impl EditPredictionStore {
                     .cancelled_predictions
                     .remove(&pending_prediction_id)
                 {
-                    project_state.last_prediction_refresh = Some((throttle_entity, Instant::now()));
+                    let new_refresh = (throttle_entity, Instant::now());
+                    match throttle_kind {
+                        PredictionThrottleKind::Edit => {
+                            project_state.last_edit_prediction_refresh = Some(new_refresh);
+                        }
+                        PredictionThrottleKind::Jump => {
+                            project_state.last_jump_prediction_refresh = Some(new_refresh);
+                        }
+                    }
                     is_cancelled = false;
                 }
             })
@@ -1755,6 +1808,46 @@ impl EditPredictionStore {
             });
             project_state.cancel_pending_prediction(pending_prediction, cx);
         }
+    }
+
+    async fn wait_for_throttle(
+        this: &WeakEntity<Self>,
+        project: &Entity<Project>,
+        throttle_kind: PredictionThrottleKind,
+        throttle_entity: EntityId,
+        cx: &mut AsyncApp,
+    ) -> Result<()> {
+        let (last_request, throttle_timeout) = this.update(cx, |this, cx| {
+            let project_state = this.get_or_init_project(project, cx);
+            let last_request = match throttle_kind {
+                PredictionThrottleKind::Edit => project_state.last_edit_prediction_refresh,
+                PredictionThrottleKind::Jump => project_state.last_jump_prediction_refresh,
+            };
+            (last_request, this.throttle_timeout())
+        })?;
+
+        if let Some((last_entity, last_timestamp)) = last_request
+            && throttle_entity == last_entity
+            && let Some(timeout) =
+                (last_timestamp + throttle_timeout).checked_duration_since(Instant::now())
+        {
+            cx.background_executor().timer(timeout).await;
+        }
+
+        this.update(cx, |this, cx| {
+            let project_state = this.get_or_init_project(project, cx);
+            let new_refresh = (throttle_entity, Instant::now());
+            match throttle_kind {
+                PredictionThrottleKind::Edit => {
+                    project_state.last_edit_prediction_refresh = Some(new_refresh);
+                }
+                PredictionThrottleKind::Jump => {
+                    project_state.last_jump_prediction_refresh = Some(new_refresh);
+                }
+            }
+        })?;
+
+        Ok(())
     }
 
     pub fn request_prediction(
@@ -1873,6 +1966,14 @@ impl EditPredictionStore {
                     )
                     .await?
                 {
+                    Self::wait_for_throttle(
+                        &this,
+                        &project,
+                        PredictionThrottleKind::Jump,
+                        project.entity_id(),
+                        cx,
+                    )
+                    .await?;
                     return this
                         .update(cx, |this, cx| {
                             this.request_prediction_internal(
