@@ -464,8 +464,8 @@ impl GitRepository for FakeGitRepository {
         let dot_git_path = self.dot_git_path.clone();
         async move {
             executor.simulate_random_delay().await;
-            // Validate before any side effects
-            fs.with_git_state(&dot_git_path, false, {
+            // Atomically validate and update state
+            fs.with_git_state(&dot_git_path, true, {
                 let path = path.clone();
                 move |state| {
                     if !state.worktrees.iter().any(|w| w.path == path) {
@@ -474,10 +474,12 @@ impl GitRepository for FakeGitRepository {
                     if !force && state.dirty_worktrees.contains(&path) {
                         bail!("worktree '{}' contains modified or untracked files, use --force to delete", path.display());
                     }
-                    Ok(())
+                    state.dirty_worktrees.remove(&path);
+                    state.worktrees.retain(|worktree| worktree.path != path);
+                    Ok::<(), anyhow::Error>(())
                 }
             })??;
-            // Remove the directory first; if it fails, state is left unchanged.
+            // Remove the directory now that state is updated.
             fs.remove_dir(
                 &path,
                 RemoveOptions {
@@ -486,15 +488,6 @@ impl GitRepository for FakeGitRepository {
                 },
             )
             .await?;
-            // Update state
-            fs.with_git_state(&dot_git_path, true, {
-                let path = path.clone();
-                move |state| {
-                    state.dirty_worktrees.remove(&path);
-                    state.worktrees.retain(|worktree| worktree.path != path);
-                    Ok::<(), anyhow::Error>(())
-                }
-            })??;
             Ok(())
         }
         .boxed()
@@ -506,17 +499,23 @@ impl GitRepository for FakeGitRepository {
         let dot_git_path = self.dot_git_path.clone();
         async move {
             executor.simulate_random_delay().await;
-            // Validate before any side effects
-            fs.with_git_state(&dot_git_path, false, {
+            // Atomically validate and update state
+            fs.with_git_state(&dot_git_path, true, {
                 let old_path = old_path.clone();
+                let new_path = new_path.clone();
                 move |state| {
-                    if !state.worktrees.iter().any(|w| w.path == old_path) {
-                        bail!("no worktree found at path: {}", old_path.display());
+                    let worktree = state.worktrees.iter_mut().find(|w| w.path == old_path);
+                    match worktree {
+                        Some(worktree) => worktree.path = new_path.clone(),
+                        None => bail!("no worktree found at path: {}", old_path.display()),
                     }
-                    Ok(())
+                    if state.dirty_worktrees.remove(&old_path) {
+                        state.dirty_worktrees.insert(new_path);
+                    }
+                    Ok::<(), anyhow::Error>(())
                 }
             })??;
-            // Move the directory first; if it fails, state is left unchanged.
+            // Move the directory now that state is updated.
             fs.rename(
                 &old_path,
                 &new_path,
@@ -527,19 +526,6 @@ impl GitRepository for FakeGitRepository {
                 },
             )
             .await?;
-            // Update state
-            fs.with_git_state(&dot_git_path, true, move |state| {
-                let worktree = state
-                    .worktrees
-                    .iter_mut()
-                    .find(|w| w.path == old_path)
-                    .context("worktree disappeared between validation and state update")?;
-                worktree.path = new_path.clone();
-                if state.dirty_worktrees.remove(&old_path) {
-                    state.dirty_worktrees.insert(new_path);
-                }
-                Ok::<(), anyhow::Error>(())
-            })??;
             Ok(())
         }
         .boxed()
