@@ -22,12 +22,6 @@ impl FeatureFlag for AgentV2FeatureFlag {
     }
 }
 
-pub struct AcpBetaFeatureFlag;
-
-impl FeatureFlag for AcpBetaFeatureFlag {
-    const NAME: &'static str = "acp-beta";
-}
-
 pub struct AgentSharingFeatureFlag;
 
 impl FeatureFlag for AgentSharingFeatureFlag {
