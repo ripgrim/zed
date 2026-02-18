@@ -173,6 +173,7 @@ When the agent requests permission, you'll see in the thread view a tool card wi
 
 Selecting "Always for <tool>" sets `tools.<tool>.default` to allow or deny.
 When a pattern can be safely extracted, selecting "Always for <pattern>" adds an `always_allow` or `always_deny` rule for that input.
+For terminal commands with subcommands, the pattern includes the subcommand. For example, `cargo build --release` shows "Always for `cargo build` commands" rather than "Always for `cargo` commands".
 MCP tools only support the tool-level option.
 
 ## Examples
