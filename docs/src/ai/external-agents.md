@@ -72,8 +72,12 @@ For more information, see the [Gemini CLI docs](https://github.com/google-gemini
 Gemini CLI supports the same workflows as Zed's first-party agent: code generation, refactoring, debugging, and Q&A. Add context by @-mentioning files, recent threads, or symbols.
 
 <<<<<<< Updated upstream
+<<<<<<< Updated upstream
 > Some agent panel features are not yet available with Gemini CLI: editing past
 > messages and checkpointing.
+=======
+> Some agent panel features are not yet available with Gemini CLI: editing past messages and checkpointing.
+>>>>>>> Stashed changes
 =======
 > Some agent panel features are not yet available with Gemini CLI: editing past messages and checkpointing.
 >>>>>>> Stashed changes
@@ -140,8 +144,12 @@ However, the SDK doesn't yet expose everything needed to fully support all of th
 - [Hooks](https://docs.anthropic.com/en/docs/claude-code/hooks-guide) are currently _not_ supported.
 
 <<<<<<< Updated upstream
+<<<<<<< Updated upstream
 > Some [agent panel](./agent-panel.md) features are not yet available with Claude
 > Agent: editing past messages and checkpointing.
+=======
+> Some [agent panel](./agent-panel.md) features are not yet available with Claude Agent: editing past messages and checkpointing.
+>>>>>>> Stashed changes
 =======
 > Some [agent panel](./agent-panel.md) features are not yet available with Claude Agent: editing past messages and checkpointing.
 >>>>>>> Stashed changes
@@ -202,8 +210,12 @@ Zed will always use this managed version of Codex even if you have it installed 
 Codex supports the same workflows as Zed's first-party agent. Add context by @-mentioning files or symbols.
 
 <<<<<<< Updated upstream
+<<<<<<< Updated upstream
 > Some agent panel features are not yet available with Codex: editing past
 > messages and checkpointing.
+=======
+> Some agent panel features are not yet available with Codex: editing past messages and checkpointing.
+>>>>>>> Stashed changes
 =======
 > Some agent panel features are not yet available with Codex: editing past messages and checkpointing.
 >>>>>>> Stashed changes
