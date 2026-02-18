@@ -1156,3 +1156,97 @@ async fn test_repository_create_worktree_remote_emits_event(
         "remote client should see the created worktree at the expected path"
     );
 }
+
+#[gpui::test]
+async fn test_repository_create_worktree_duplicate_branch(
+    executor: BackgroundExecutor,
+    cx_a: &mut TestAppContext,
+) {
+    let mut server = TestServer::start(executor.clone()).await;
+    let client = server.create_client(cx_a, "user").await;
+
+    client
+        .fs()
+        .insert_tree(path!("/project"), json!({ ".git": {} }))
+        .await;
+    client
+        .fs()
+        .insert_branches(Path::new(path!("/project/.git")), &["main"]);
+
+    let (project, _) = client.build_local_project(path!("/project"), cx_a).await;
+    executor.run_until_parked();
+
+    let repo = cx_a.update(|cx| project.read(cx).active_repository(cx).unwrap());
+
+    // No worktrees initially.
+    let worktrees = cx_a
+        .update(|cx| repo.update(cx, |repo, _| repo.worktrees()))
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(worktrees.is_empty(), "should start with no worktrees");
+
+    // Create a worktree for branch "feature" — should succeed.
+    cx_a.update(|cx| {
+        repo.update(cx, |repo, cx| {
+            repo.create_worktree("feature".to_string(), PathBuf::from("/worktrees"), None, cx)
+        })
+    })
+    .await
+    .unwrap()
+    .unwrap();
+    executor.run_until_parked();
+
+    let worktrees = cx_a
+        .update(|cx| repo.update(cx, |repo, _| repo.worktrees()))
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        worktrees.len(),
+        1,
+        "should have one worktree after first create"
+    );
+
+    // Attempt to create a second worktree with the same branch name — should fail.
+    let result = cx_a
+        .update(|cx| {
+            repo.update(cx, |repo, cx| {
+                repo.create_worktree(
+                    "feature".to_string(),
+                    PathBuf::from("/other-worktrees"),
+                    None,
+                    cx,
+                )
+            })
+        })
+        .await
+        .unwrap();
+    assert!(
+        result.is_err(),
+        "creating a worktree with a duplicate branch name should fail"
+    );
+    let err_msg = result.unwrap_err().to_string();
+    assert!(
+        err_msg.contains("already exists"),
+        "error should mention that the branch already exists, got: {err_msg}"
+    );
+    executor.run_until_parked();
+
+    // Confirm there is still only one worktree.
+    let worktrees = cx_a
+        .update(|cx| repo.update(cx, |repo, _| repo.worktrees()))
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        worktrees.len(),
+        1,
+        "should still have exactly one worktree after failed duplicate create"
+    );
+    assert_eq!(
+        worktrees[0].path,
+        PathBuf::from("/worktrees/feature"),
+        "original worktree should be unaffected"
+    );
+}
