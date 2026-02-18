@@ -23,6 +23,12 @@
       "title": "git: Enable the split diff for everyone",
       "file": "suggestions/PR-48912.md",
       "date": "2026-02-11T06:28:55Z"
+    },
+    {
+      "pr": 49374,
+      "title": "Enable type on search by default for the project search",
+      "file": "suggestions/PR-49374.md",
+      "date": "2026-02-18T21:41:23Z"
     }
   ]
 }
