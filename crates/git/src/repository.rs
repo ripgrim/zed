@@ -644,6 +644,12 @@ pub trait GitRepository: Send + Sync {
 
     fn worktrees(&self) -> BoxFuture<'_, Result<Vec<Worktree>>>;
 
+    /// Creates a new git worktree at `path/name` on a new branch named `name`.
+    ///
+    /// **Always creates a new branch** via `git worktree add -b <name>`. If a branch
+    /// named `name` already exists in the repository this will fail. To create a
+    /// worktree for an existing branch, delete the branch first or choose a different
+    /// name.
     fn create_worktree(
         &self,
         name: String,
