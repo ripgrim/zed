@@ -1897,14 +1897,14 @@ impl EditPredictionStore {
 
         let inputs = EditPredictionModelInput {
             project: project.clone(),
-            buffer: active_buffer.clone(),
-            snapshot: snapshot.clone(),
+            buffer: active_buffer,
+            snapshot: snapshot,
             position,
             events,
             related_files,
             recent_paths: project_state.recent_paths.clone(),
             trigger,
-            diagnostic_search_range: diagnostic_search_range.clone(),
+            diagnostic_search_range: diagnostic_search_range,
             debug_tx,
             user_actions,
         };
