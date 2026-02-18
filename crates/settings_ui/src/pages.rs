@@ -8,7 +8,7 @@ pub(crate) use audio_input_output_setup::{
 };
 pub(crate) use audio_test_window::open_audio_test_window;
 pub(crate) use edit_prediction_provider_setup::render_edit_prediction_setup_page;
-pub(crate) use tool_permissions_setup::render_tool_permissions_setup_page;
+pub(crate) use tool_permissions_setup::{render_tool_permissions_setup_page, save_pattern};
 
 pub use tool_permissions_setup::{
     render_copy_path_tool_config, render_create_directory_tool_config,

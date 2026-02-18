@@ -12,7 +12,7 @@ use ui::{Banner, ContextMenu, Divider, PopoverMenu, Severity, Tooltip, prelude::
 use util::ResultExt as _;
 use util::shell::ShellKind;
 
-use crate::{SettingsWindow, components::SettingsInputField};
+use crate::{DeletedPattern, SettingsWindow, components::SettingsInputField};
 
 const HARDCODED_RULES_DESCRIPTION: &str =
     "`rm -rf` commands are always blocked when run on `$HOME`, `~`, `.`, `..`, or `/`";
@@ -985,7 +985,12 @@ fn render_user_pattern_row(
                 .icon_size(IconSize::Small)
                 .icon_color(Color::Muted)
                 .tooltip(Tooltip::text("Delete Pattern"))
-                .on_click(cx.listener(move |_, _, _, cx| {
+                .on_click(cx.listener(move |this, _, _, cx| {
+                    this.last_deleted_pattern = Some(DeletedPattern {
+                        tool_id: tool_id_for_delete.clone(),
+                        rule_type,
+                        pattern: pattern_for_delete.clone(),
+                    });
                     delete_pattern(&tool_id_for_delete, rule_type, &pattern_for_delete, cx);
                 })),
         )
@@ -1226,7 +1231,12 @@ fn get_tool_rules(tool_name: &str, cx: &App) -> ToolRulesView {
     }
 }
 
-fn save_pattern(tool_name: &str, rule_type: ToolPermissionMode, pattern: String, cx: &mut App) {
+pub(crate) fn save_pattern(
+    tool_name: &str,
+    rule_type: ToolPermissionMode,
+    pattern: String,
+    cx: &mut App,
+) {
     let tool_name = tool_name.to_string();
 
     SettingsStore::global(cx).update_settings_file(<dyn fs::Fs>::global(cx), move |settings, _| {

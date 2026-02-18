@@ -21,7 +21,8 @@ use release_channel::ReleaseChannel;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use settings::{
-    IntoGpui, Settings, SettingsContent, SettingsStore, initial_project_settings_content,
+    IntoGpui, Settings, SettingsContent, SettingsStore, ToolPermissionMode,
+    initial_project_settings_content,
 };
 use std::{
     any::{Any, TypeId, type_name},
@@ -724,6 +725,12 @@ fn active_language_mut() -> Option<std::sync::RwLockWriteGuard<'static, Option<S
     ACTIVE_LANGUAGE.write().ok()
 }
 
+pub(crate) struct DeletedPattern {
+    pub tool_id: String,
+    pub rule_type: ToolPermissionMode,
+    pub pattern: String,
+}
+
 pub struct SettingsWindow {
     title_bar: Option<Entity<PlatformTitleBar>>,
     original_window: Option<WindowHandle<MultiWorkspace>>,
@@ -756,6 +763,7 @@ pub struct SettingsWindow {
     list_state: ListState,
     shown_errors: HashSet<String>,
     pub(crate) regex_validation_error: Option<String>,
+    pub(crate) last_deleted_pattern: Option<DeletedPattern>,
 }
 
 struct SearchDocument {
@@ -1667,6 +1675,7 @@ impl SettingsWindow {
             search_index: None,
             shown_errors: HashSet::default(),
             regex_validation_error: None,
+            last_deleted_pattern: None,
             list_state,
         };
 
@@ -3708,6 +3717,16 @@ impl Render for SettingsWindow {
                                 window.focus_next(cx);
                             }
                         }))
+                        .on_action(cx.listener(|this, _: &editor::actions::Undo, _window, cx| {
+                            if let Some(deleted) = this.last_deleted_pattern.take() {
+                                crate::pages::save_pattern(
+                                    &deleted.tool_id,
+                                    deleted.rule_type,
+                                    deleted.pattern,
+                                    cx,
+                                );
+                            }
+                        }))
                         .on_action(|_: &menu::SelectPrevious, window, cx| {
                             window.focus_prev(cx);
                         })
@@ -4385,6 +4404,7 @@ pub mod test {
                 list_state: ListState::new(0, gpui::ListAlignment::Top, px(0.0)),
                 shown_errors: HashSet::default(),
                 regex_validation_error: None,
+                last_deleted_pattern: None,
             }
         }
     }
@@ -4510,6 +4530,7 @@ pub mod test {
             list_state: ListState::new(0, gpui::ListAlignment::Top, px(0.0)),
             shown_errors: HashSet::default(),
             regex_validation_error: None,
+            last_deleted_pattern: None,
         };
 
         settings_window.build_filter_table();
