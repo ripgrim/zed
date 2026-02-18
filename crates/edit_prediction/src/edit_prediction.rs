@@ -446,13 +446,6 @@ impl PredictionRequestedBy {
     }
 }
 
-// todo! just use request reason
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-enum PredictionThrottleKind {
-    Edit,
-    Jump,
-}
-
 const DIAGNOSTIC_LINES_RANGE: u32 = 20;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -1498,7 +1491,7 @@ impl EditPredictionStore {
     ) {
         self.queue_prediction_refresh(
             project.clone(),
-            PredictionThrottleKind::Edit,
+            PredictEditsRequestTrigger::Other,
             buffer.entity_id(),
             cx,
             move |this, cx| {
@@ -1548,7 +1541,7 @@ impl EditPredictionStore {
 
         self.queue_prediction_refresh(
             project.clone(),
-            PredictionThrottleKind::Jump,
+            PredictEditsRequestTrigger::Diagnostics,
             project.entity_id(),
             cx,
             move |this, cx| {
@@ -1675,7 +1668,7 @@ impl EditPredictionStore {
     fn queue_prediction_refresh(
         &mut self,
         project: Entity<Project>,
-        throttle_kind: PredictionThrottleKind,
+        request_trigger: PredictEditsRequestTrigger,
         throttle_entity: EntityId,
         cx: &mut Context<Self>,
         do_refresh: impl FnOnce(
@@ -1685,6 +1678,18 @@ impl EditPredictionStore {
             -> Task<Result<Option<(EditPredictionResult, PredictionRequestedBy)>>>
         + 'static,
     ) {
+        fn select_throttle(
+            project_state: &mut ProjectState,
+            request_trigger: PredictEditsRequestTrigger,
+        ) -> &mut Option<(EntityId, Instant)> {
+            match request_trigger {
+                PredictEditsRequestTrigger::Diagnostics => {
+                    &mut project_state.last_jump_prediction_refresh
+                }
+                _ => &mut project_state.last_edit_prediction_refresh,
+            }
+        }
+
         let is_ollama = self.edit_prediction_model == EditPredictionModel::Ollama;
         let drop_on_cancel = is_ollama;
         let max_pending_predictions = if is_ollama { 1 } else { 2 };
@@ -1692,10 +1697,7 @@ impl EditPredictionStore {
         let project_state = self.get_or_init_project(&project, cx);
         let pending_prediction_id = project_state.next_pending_prediction_id;
         project_state.next_pending_prediction_id += 1;
-        let last_request = match throttle_kind {
-            PredictionThrottleKind::Edit => project_state.last_edit_prediction_refresh,
-            PredictionThrottleKind::Jump => project_state.last_jump_prediction_refresh,
-        };
+        let last_request = *select_throttle(project_state, request_trigger);
 
         let task = cx.spawn(async move |this, cx| {
             if let Some(timeout) = last_request.and_then(|(last_entity, last_timestamp)| {
@@ -1717,14 +1719,7 @@ impl EditPredictionStore {
                     .remove(&pending_prediction_id);
                 if !was_cancelled {
                     let new_refresh = (throttle_entity, Instant::now());
-                    match throttle_kind {
-                        PredictionThrottleKind::Edit => {
-                            project_state.last_edit_prediction_refresh = Some(new_refresh);
-                        }
-                        PredictionThrottleKind::Jump => {
-                            project_state.last_jump_prediction_refresh = Some(new_refresh);
-                        }
-                    };
+                    *select_throttle(project_state, request_trigger) = Some(new_refresh);
                     is_cancelled = false;
                 }
             })
