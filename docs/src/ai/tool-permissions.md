@@ -178,6 +178,7 @@ MCP tools only support the tool-level option.
 
 ### Subcommand-Specific Patterns
 
+<<<<<<< Updated upstream
 For terminal commands with subcommands, the extracted pattern includes the subcommand. For example:
 
 | Command                 | Pattern            | Button label                      |
@@ -188,6 +189,18 @@ For terminal commands with subcommands, the extracted pattern includes the subco
 | `ls -la`                | `^ls\b`            | Always for `ls` commands          |
 
 This means selecting "Always allow for `cargo build` commands" permits only `cargo build` invocations—not `cargo test`, `cargo run`, or other subcommands. When the second token is a flag (like `ls -la`), only the command name is used for the pattern.
+=======
+When a terminal command includes a subcommand (like `cargo build` or `npm install`), the pattern suggestion includes the subcommand for more precise matching:
+
+| Command                 | Pattern Suggestion                  |
+| ----------------------- | ----------------------------------- |
+| `cargo build --release` | "Always for `cargo build` commands" |
+| `npm install`           | "Always for `npm install` commands" |
+| `git push origin main`  | "Always for `git push` commands"    |
+| `ls -la`                | "Always for `ls` commands"          |
+
+Flags and arguments (like `--release` or `-la`) don't trigger subcommand extraction—only the base command and its first subcommand are used in the pattern.
+>>>>>>> Stashed changes
 
 ## Examples
 

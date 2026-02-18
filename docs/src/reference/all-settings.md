@@ -448,6 +448,18 @@ When enabled, this setting will automatically close tabs for files that have bee
 
 Note: Dirty files (files with unsaved changes) will not be automatically closed even when this setting is enabled, ensuring you don't lose unsaved work.
 
+## Close Panel on Toggle
+
+- Description: Whether toggling a panel (with its keyboard shortcut) closes the panel when it's already focused, instead of moving focus back to the editor.
+- Setting: `close_panel_on_toggle`
+- Default: `false`
+
+**Options**
+
+`boolean` values
+
+When set to `true`, pressing the toggle keybinding for a panel that is already focused closes the panel. When set to `false` (default), pressing the toggle keybinding moves focus back to the editor without closing the panel.
+
 ## Confirm Quit
 
 - Description: Whether or not to prompt the user to confirm before closing the application.
