@@ -197,7 +197,7 @@ impl MarkdownStyle {
                     font_fallbacks: theme_settings.buffer_font.fallbacks.clone(),
                     font_features: Some(theme_settings.buffer_font.features.clone()),
                     font_size: Some(buffer_font_size.into()),
-                    font_weight: Some(buffer_font_weight.clone()),
+                    font_weight: Some(buffer_font_weight),
                     ..Default::default()
                 },
                 ..Default::default()

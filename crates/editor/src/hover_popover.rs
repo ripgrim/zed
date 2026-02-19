@@ -613,7 +613,7 @@ pub fn hover_markdown_style(window: &Window, cx: &App) -> MarkdownStyle {
     let buffer_font_family = settings.buffer_font.family.clone();
     let buffer_font_features = settings.buffer_font.features.clone();
     let buffer_font_fallbacks = settings.buffer_font.fallbacks.clone();
-    let buffer_font_weight = settings.buffer_font.weight.clone();
+    let buffer_font_weight = settings.buffer_font.weight;
 
     let mut base_text_style = window.text_style();
     base_text_style.refine(&TextStyleRefinement {
@@ -629,7 +629,7 @@ pub fn hover_markdown_style(window: &Window, cx: &App) -> MarkdownStyle {
             .my(rems(1.))
             .font_buffer(cx)
             .font_features(buffer_font_features.clone())
-            .font_weight(buffer_font_weight.clone()),
+            .font_weight(buffer_font_weight),
         inline_code: TextStyleRefinement {
             background_color: Some(cx.theme().colors().background),
             font_family: Some(buffer_font_family),
