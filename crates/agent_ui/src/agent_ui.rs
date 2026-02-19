@@ -32,7 +32,7 @@ use client::Client;
 use command_palette_hooks::CommandPaletteFilter;
 use feature_flags::{AgentV2FeatureFlag, FeatureFlagAppExt as _};
 use fs::Fs;
-use gpui::{Action, App, Context, Entity, SharedString, UpdateGlobal, Window, actions};
+use gpui::{Action, App, Context, Entity, SharedString, Window, actions};
 use language::{
     LanguageRegistry,
     language_settings::{AllLanguageSettings, EditPredictionProvider},
@@ -44,7 +44,7 @@ use project::DisableAiSettings;
 use prompt_store::PromptBuilder;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
-use settings::{DockPosition, LanguageModelSelection, Settings as _, SettingsStore};
+use settings::{LanguageModelSelection, Settings as _, SettingsStore};
 use std::any::TypeId;
 use workspace::Workspace;
 
@@ -111,6 +111,8 @@ actions!(
         Reject,
         /// Rejects all suggestions or changes.
         RejectAll,
+        /// Undoes the most recent reject operation, restoring the rejected changes.
+        UndoLastReject,
         /// Keeps all suggestions or changes.
         KeepAll,
         /// Allow this operation only this time.
@@ -226,9 +228,12 @@ impl ExternalAgent {
 }
 
 /// Content to initialize new external agent with.
-pub enum ExternalAgentInitialContent {
+pub enum AgentInitialContent {
     ThreadSummary(acp_thread::AgentSessionInfo),
-    Text(String),
+    ContentBlock {
+        blocks: Vec<agent_client_protocol::ContentBlock>,
+        auto_submit: bool,
+    },
 }
 
 /// Opens the profile management interface for configuring agent tools and settings.
@@ -336,19 +341,6 @@ pub fn init(
         update_command_palette_filter(cx);
     })
     .detach();
-
-    cx.observe_flag::<AgentV2FeatureFlag, _>(|is_enabled, cx| {
-        SettingsStore::update_global(cx, |store, cx| {
-            store.update_default_settings(cx, |defaults| {
-                defaults.agent.get_or_insert_default().dock = Some(if is_enabled {
-                    DockPosition::Left
-                } else {
-                    DockPosition::Right
-                });
-            });
-        });
-    })
-    .detach();
 }
 
 fn update_command_palette_filter(cx: &mut App) {
@@ -431,9 +423,6 @@ fn update_command_palette_filter(cx: &mut App) {
 
             filter.show_namespace("zed_predict_onboarding");
             filter.show_action_types(&[TypeId::of::<zed_actions::OpenZedPredictOnboarding>()]);
-            if !agent_v2_enabled {
-                filter.hide_action_types(&[TypeId::of::<zed_actions::agent::ToggleAgentPane>()]);
-            }
         }
 
         if agent_v2_enabled {
@@ -539,7 +528,7 @@ mod tests {
     use gpui::{BorrowAppContext, TestAppContext, px};
     use project::DisableAiSettings;
     use settings::{
-        DefaultAgentView, DockPosition, DockSide, NotifyWhenAgentWaiting, Settings, SettingsStore,
+        DefaultAgentView, DockPosition, NotifyWhenAgentWaiting, Settings, SettingsStore,
     };
 
     #[gpui::test]
@@ -558,7 +547,6 @@ mod tests {
             enabled: true,
             button: true,
             dock: DockPosition::Right,
-            agents_panel_dock: DockSide::Left,
             default_width: px(300.),
             default_height: px(600.),
             default_model: None,

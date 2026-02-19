@@ -300,10 +300,7 @@ impl LanguageModel for OpenAiLanguageModel {
     fn supports_images(&self) -> bool {
         use open_ai::Model;
         match &self.model {
-            Model::FourOmni
-            | Model::FourOmniMini
-            | Model::FourPointOne
-            | Model::FourPointOneMini
+            Model::FourOmniMini
             | Model::FourPointOneNano
             | Model::Five
             | Model::FiveCodex
@@ -313,8 +310,7 @@ impl LanguageModel for OpenAiLanguageModel {
             | Model::FivePointTwo
             | Model::FivePointTwoCodex
             | Model::O1
-            | Model::O3
-            | Model::O4Mini => true,
+            | Model::O3 => true,
             Model::ThreePointFiveTurbo
             | Model::Four
             | Model::FourTurbo
@@ -329,6 +325,10 @@ impl LanguageModel for OpenAiLanguageModel {
             LanguageModelToolChoice::Any => true,
             LanguageModelToolChoice::None => true,
         }
+    }
+
+    fn supports_thinking(&self) -> bool {
+        self.model.reasoning_effort().is_some()
     }
 
     fn supports_split_token_display(&self) -> bool {
@@ -1155,7 +1155,7 @@ pub fn count_open_ai_tokens(
         match model {
             Model::Custom { max_tokens, .. } => {
                 let model = if max_tokens >= 100_000 {
-                    // If the max tokens is 100k or more, it is likely the o200k_base tokenizer from gpt4o
+                    // If the max tokens is 100k or more, it likely uses the o200k_base tokenizer
                     "gpt-4o"
                 } else {
                     // Otherwise fallback to gpt-4, since only cl100k_base and o200k_base are
@@ -1171,15 +1171,11 @@ pub fn count_open_ai_tokens(
             Model::ThreePointFiveTurbo
             | Model::Four
             | Model::FourTurbo
-            | Model::FourOmni
             | Model::FourOmniMini
-            | Model::FourPointOne
-            | Model::FourPointOneMini
             | Model::FourPointOneNano
             | Model::O1
             | Model::O3
             | Model::O3Mini
-            | Model::O4Mini
             | Model::Five
             | Model::FiveCodex
             | Model::FiveMini

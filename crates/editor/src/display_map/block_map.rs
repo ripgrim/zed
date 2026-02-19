@@ -16,7 +16,7 @@ use multi_buffer::{
 };
 use parking_lot::Mutex;
 use std::{
-    cell::RefCell,
+    cell::{Cell, RefCell},
     cmp::{self, Ordering},
     fmt::Debug,
     ops::{Deref, DerefMut, Not, Range, RangeBounds, RangeInclusive},
@@ -45,6 +45,7 @@ pub struct BlockMap {
     excerpt_header_height: u32,
     pub(super) folded_buffers: HashSet<BufferId>,
     buffers_with_disabled_headers: HashSet<BufferId>,
+    pub(super) deferred_edits: Cell<Patch<WrapRow>>,
 }
 
 pub struct BlockMapReader<'a> {
@@ -620,6 +621,7 @@ impl BlockMap {
             wrap_snapshot: RefCell::new(wrap_snapshot.clone()),
             buffer_header_height,
             excerpt_header_height,
+            deferred_edits: Cell::default(),
         };
         map.sync(
             &wrap_snapshot,
@@ -707,6 +709,7 @@ impl BlockMap {
         }
     }
 
+    // Warning: doesn't sync the block map, use advisedly
     pub(crate) fn insert_block_raw(
         &mut self,
         block: BlockProperties<Anchor>,
@@ -732,6 +735,25 @@ impl BlockMap {
         id
     }
 
+    // Warning: doesn't sync the block map, use advisedly
+    pub(crate) fn retain_blocks_raw(&mut self, pred: &mut dyn FnMut(&Arc<CustomBlock>) -> bool) {
+        let mut ids_to_remove = HashSet::default();
+        self.custom_blocks.retain(|block| {
+            let keep = pred(block);
+            if !keep {
+                ids_to_remove.insert(block.id);
+            }
+            keep
+        });
+        self.custom_blocks_by_id
+            .retain(|id, _| !ids_to_remove.contains(id));
+    }
+
+    // Warning: doesn't sync the block map, use advisedly
+    pub(crate) fn blocks_raw(&self) -> impl Iterator<Item = &Arc<CustomBlock>> {
+        self.custom_blocks.iter()
+    }
+
     #[ztracing::instrument(skip_all, fields(edits = ?edits))]
     fn sync(
         &self,
@@ -740,6 +762,8 @@ impl BlockMap {
         companion_view: Option<CompanionView>,
     ) {
         let buffer = wrap_snapshot.buffer_snapshot();
+
+        edits = self.deferred_edits.take().compose(edits);
 
         // Handle changing the last excerpt if it is empty.
         if buffer.trailing_excerpt_update_count()
@@ -1017,8 +1041,9 @@ impl BlockMap {
                 |point, bias| {
                     wrap_point_cursor
                         .map(
-                            tab_point_cursor
-                                .map(fold_point_cursor.map(inlay_point_cursor.map(point), bias)),
+                            tab_point_cursor.map(
+                                fold_point_cursor.map(inlay_point_cursor.map(point, bias), bias),
+                            ),
                         )
                         .row()
                 },
@@ -1232,32 +1257,33 @@ impl BlockMap {
         let mut companion_tab_point_cursor = companion_snapshot.tab_point_cursor();
         let mut companion_wrap_point_cursor = companion_snapshot.wrap_point_cursor();
 
-        let mut our_wrapper = |our_point: Point| {
+        let mut our_wrapper = |our_point: Point, bias: Bias| {
             our_wrap_point_cursor
                 .map(our_tab_point_cursor.map(
-                    our_fold_point_cursor.map(our_inlay_point_cursor.map(our_point), Bias::Left),
+                    our_fold_point_cursor.map(our_inlay_point_cursor.map(our_point, bias), bias),
                 ))
                 .row()
         };
-        let mut companion_wrapper = |their_point: Point| {
+        let mut companion_wrapper = |their_point: Point, bias: Bias| {
             companion_wrap_point_cursor
                 .map(
                     companion_tab_point_cursor.map(
                         companion_fold_point_cursor
-                            .map(companion_inlay_point_cursor.map(their_point), Bias::Left),
+                            .map(companion_inlay_point_cursor.map(their_point, bias), bias),
                     ),
                 )
                 .row()
         };
         fn determine_spacer(
-            our_wrapper: &mut impl FnMut(Point) -> WrapRow,
-            companion_wrapper: &mut impl FnMut(Point) -> WrapRow,
+            our_wrapper: &mut dyn FnMut(Point, Bias) -> WrapRow,
+            companion_wrapper: &mut dyn FnMut(Point, Bias) -> WrapRow,
             our_point: Point,
             their_point: Point,
             delta: i32,
+            bias: Bias,
         ) -> (i32, Option<(WrapRow, u32)>) {
-            let our_wrap = our_wrapper(our_point);
-            let companion_wrap = companion_wrapper(their_point);
+            let our_wrap = our_wrapper(our_point, bias);
+            let companion_wrap = companion_wrapper(their_point, bias);
             let new_delta = companion_wrap.0 as i32 - our_wrap.0 as i32;
 
             let spacer = if new_delta > delta {
@@ -1313,9 +1339,11 @@ impl BlockMap {
                 // Case 3: We are at the start of the excerpt--no previous row to use as the baseline.
                 (first_point, edit_for_first_point.new.start)
             };
-            let our_baseline = our_wrapper(our_baseline);
-            let their_baseline =
-                companion_wrapper(their_baseline.min(excerpt.target_excerpt_range.end));
+            let our_baseline = our_wrapper(our_baseline, Bias::Left);
+            let their_baseline = companion_wrapper(
+                their_baseline.min(excerpt.target_excerpt_range.end),
+                Bias::Left,
+            );
 
             let mut delta = their_baseline.0 as i32 - our_baseline.0 as i32;
 
@@ -1338,6 +1366,7 @@ impl BlockMap {
                     current_boundary,
                     current_range.end.min(excerpt.target_excerpt_range.end),
                     delta,
+                    Bias::Left,
                 );
 
                 delta = new_delta;
@@ -1371,6 +1400,7 @@ impl BlockMap {
                     current_boundary,
                     current_range.start.min(excerpt.target_excerpt_range.end),
                     delta,
+                    Bias::Left,
                 );
                 delta = delta_at_start;
 
@@ -1411,6 +1441,7 @@ impl BlockMap {
                         current_boundary,
                         current_range.end.min(excerpt.target_excerpt_range.end),
                         delta,
+                        Bias::Left,
                     );
                     delta = delta_at_end;
                     spacer_at_end
@@ -1449,6 +1480,7 @@ impl BlockMap {
                     last_source_point,
                     excerpt.target_excerpt_range.end,
                     delta,
+                    Bias::Right,
                 );
                 if let Some((wrap_row, height)) = spacer {
                     result.push((
@@ -2603,9 +2635,11 @@ impl<'a> Iterator for BlockChunks<'a> {
         self.input_chunk.text = suffix;
         self.input_chunk.tabs >>= prefix_bytes.saturating_sub(1);
         self.input_chunk.chars >>= prefix_bytes.saturating_sub(1);
+        self.input_chunk.newlines >>= prefix_bytes.saturating_sub(1);
 
         let mut tabs = self.input_chunk.tabs;
         let mut chars = self.input_chunk.chars;
+        let mut newlines = self.input_chunk.newlines;
 
         if self.masked {
             // Not great for multibyte text because to keep cursor math correct we
@@ -2615,12 +2649,14 @@ impl<'a> Iterator for BlockChunks<'a> {
             prefix = unsafe { std::str::from_utf8_unchecked(&BULLETS[..bullet_len]) };
             chars = 1u128.unbounded_shl(bullet_len as u32).wrapping_sub(1);
             tabs = 0;
+            newlines = 0;
         }
 
         let chunk = Chunk {
             text: prefix,
             tabs,
             chars,
+            newlines,
             ..self.input_chunk.clone()
         };
 
@@ -4066,8 +4102,9 @@ mod tests {
                 |point, bias| {
                     wrap_point_cursor
                         .map(
-                            tab_point_cursor
-                                .map(fold_point_cursor.map(inlay_point_cursor.map(point), bias)),
+                            tab_point_cursor.map(
+                                fold_point_cursor.map(inlay_point_cursor.map(point, bias), bias),
+                            ),
                         )
                         .row()
                 },
