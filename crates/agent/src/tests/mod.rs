@@ -1,7 +1,7 @@
 use super::*;
 use acp_thread::{
-    AgentConnection, AgentModelGroupName, AgentModelList, PermissionOptions, StubAgentConnection,
-    ThreadStatus, UserMessageId,
+    AgentConnection, AgentModelGroupName, AgentModelList, PermissionOptions, ThreadStatus,
+    UserMessageId,
 };
 use agent_client_protocol::{self as acp};
 use agent_settings::AgentProfileId;
@@ -11,14 +11,14 @@ use cloud_llm_client::CompletionIntent;
 use collections::IndexMap;
 use context_server::{ContextServer, ContextServerCommand, ContextServerId};
 use feature_flags::FeatureFlagAppExt as _;
-use fs::{FakeFs, Fs, RealFs};
+use fs::{FakeFs, Fs};
 use futures::{
     FutureExt as _, StreamExt,
     channel::{
         mpsc::{self, UnboundedReceiver},
         oneshot,
     },
-    future::{Fuse, Shared},
+    future::Shared,
 };
 use gpui::{
     App, AppContext, AsyncApp, Entity, Task, TestAppContext, UpdateGlobal,
@@ -43,7 +43,6 @@ use serde_json::json;
 use settings::{Settings, SettingsStore};
 use std::{
     path::Path,
-    pin::Pin,
     rc::Rc,
     sync::{
         Arc,
@@ -66,6 +65,7 @@ fn init_test(cx: &mut TestAppContext) {
 struct FakeTerminalHandleWithInput {
     killed: Arc<AtomicBool>,
     input_received: Arc<std::sync::Mutex<Vec<String>>>,
+    exit_sender: std::cell::RefCell<Option<oneshot::Sender<acp::TerminalExitStatus>>>,
     wait_for_exit: Shared<Task<acp::TerminalExitStatus>>,
     output: acp::TerminalOutputResponse,
     id: acp::TerminalId,
@@ -76,30 +76,19 @@ impl FakeTerminalHandleWithInput {
         let killed = Arc::new(AtomicBool::new(false));
         let input_received = Arc::new(std::sync::Mutex::new(Vec::<String>::new()));
 
-        let killed_for_task = killed.clone();
-        let input_for_task = input_received.clone();
+        let (exit_sender, exit_receiver) = oneshot::channel();
+
         let wait_for_exit = cx
-            .spawn(async move |cx| {
-                loop {
-                    if killed_for_task.load(Ordering::SeqCst) {
-                        return acp::TerminalExitStatus::new();
-                    }
-                    {
-                        let inputs = input_for_task.lock().unwrap();
-                        if inputs.iter().any(|s| s.contains("q")) {
-                            return acp::TerminalExitStatus::new().exit_code(Some(0));
-                        }
-                    }
-                    cx.background_executor()
-                        .timer(Duration::from_millis(1))
-                        .await;
-                }
+            .spawn(async move |_cx| match exit_receiver.await {
+                Ok(status) => status,
+                Err(_) => acp::TerminalExitStatus::new(),
             })
             .shared();
 
         Self {
             killed,
             input_received,
+            exit_sender: std::cell::RefCell::new(Some(exit_sender)),
             wait_for_exit,
             output: acp::TerminalOutputResponse::new("README.md contents".to_string(), false),
             id: acp::TerminalId::new("fake_terminal_with_input".to_string()),
@@ -126,11 +115,19 @@ impl crate::TerminalHandle for FakeTerminalHandleWithInput {
 
     fn kill(&self, _cx: &AsyncApp) -> Result<()> {
         self.killed.store(true, Ordering::SeqCst);
+        if let Some(sender) = self.exit_sender.borrow_mut().take() {
+            let _ = sender.send(acp::TerminalExitStatus::new());
+        }
         Ok(())
     }
 
     fn send_input(&self, input: &str, _cx: &AsyncApp) -> Result<()> {
         self.input_received.lock().unwrap().push(input.to_string());
+        if input.contains("q") {
+            if let Some(sender) = self.exit_sender.borrow_mut().take() {
+                let _ = sender.send(acp::TerminalExitStatus::new().exit_code(Some(0)));
+            }
+        }
         Ok(())
     }
 
@@ -156,10 +153,19 @@ impl crate::ThreadEnvironment for FakeThreadEnvironmentWithInput {
 
     fn get_terminal(
         &self,
-        _terminal_id: &acp::TerminalId,
+        terminal_id: &acp::TerminalId,
         _cx: &AsyncApp,
     ) -> Result<Rc<dyn crate::TerminalHandle>> {
-        Ok(self.handle.clone() as Rc<dyn crate::TerminalHandle>)
+        let handle_id = &self.handle.id;
+        if handle_id == terminal_id {
+            Ok(self.handle.clone() as Rc<dyn crate::TerminalHandle>)
+        } else {
+            anyhow::bail!(
+                "Terminal {:?} not found (have {:?})",
+                terminal_id,
+                handle_id
+            )
+        }
     }
 
     fn create_subagent(
@@ -172,6 +178,10 @@ impl crate::ThreadEnvironment for FakeThreadEnvironmentWithInput {
         _cx: &mut App,
     ) -> Result<Rc<dyn SubagentHandle>> {
         unimplemented!()
+    }
+
+    fn kill_all_terminals(&self, _cx: &AsyncApp) -> Result<()> {
+        Ok(())
     }
 }
 
@@ -344,6 +354,10 @@ impl crate::ThreadEnvironment for FakeThreadEnvironment {
             .expect("Subagent handle not available on FakeThreadEnvironment")
             as Rc<dyn SubagentHandle>)
     }
+
+    fn kill_all_terminals(&self, _cx: &AsyncApp) -> Result<()> {
+        Ok(())
+    }
 }
 
 /// Environment that creates multiple independent terminal handles for testing concurrent terminals.
@@ -396,10 +410,14 @@ impl crate::ThreadEnvironment for MultiTerminalEnvironment {
         let handles = self.handles.borrow();
         handles
             .iter()
-            .find(|h| h.id.0 == terminal_id.0)
+            .find(|h| h.id == *terminal_id)
             .cloned()
             .map(|h| h as Rc<dyn crate::TerminalHandle>)
             .ok_or_else(|| anyhow::anyhow!("Terminal {:?} not found", terminal_id))
+    }
+
+    fn kill_all_terminals(&self, _cx: &AsyncApp) -> Result<()> {
+        Ok(())
     }
 }
 
@@ -436,7 +454,7 @@ async fn test_echo(cx: &mut TestAppContext) {
 }
 
 #[gpui::test]
-async fn test_terminal_tool_timeout_kills_handle(cx: &mut TestAppContext) {
+async fn test_terminal_tool_timeout_keeps_handle_alive(cx: &mut TestAppContext) {
     init_test(cx);
     always_allow_tools(cx);
 
@@ -476,31 +494,21 @@ async fn test_terminal_tool_timeout_kills_handle(cx: &mut TestAppContext) {
         "expected tool call update to include terminal content"
     );
 
-    let mut task_future: Pin<Box<Fuse<Task<Result<String>>>>> = Box::pin(task.fuse());
+    cx.run_until_parked();
+    cx.background_executor
+        .timer(Duration::from_millis(50))
+        .await;
+    cx.run_until_parked();
 
-    let deadline = std::time::Instant::now() + Duration::from_millis(500);
-    loop {
-        if let Some(result) = task_future.as_mut().now_or_never() {
-            let result = result.expect("terminal tool task should complete");
-
-            assert!(
-                handle.was_killed(),
-                "expected terminal handle to be killed on timeout"
-            );
-            assert!(
-                result.contains("partial output"),
-                "expected result to include terminal output, got: {result}"
-            );
-            return;
-        }
-
-        if std::time::Instant::now() >= deadline {
-            panic!("timed out waiting for terminal tool task to complete");
-        }
-
-        cx.run_until_parked();
-        cx.background_executor.timer(Duration::from_millis(1)).await;
-    }
+    let result = task.await.expect("terminal tool task should complete");
+    assert!(
+        !handle.was_killed(),
+        "terminal should NOT be killed on timeout"
+    );
+    assert!(
+        result.contains("still running"),
+        "expected result to indicate process is still running, got: {result}"
+    );
 }
 
 #[gpui::test]
@@ -587,146 +595,22 @@ async fn test_terminal_tool_send_input(cx: &mut TestAppContext) {
         )
     });
 
-    let mut task_future: Pin<Box<Fuse<Task<Result<String>>>>> = Box::pin(task.fuse());
+    let result = task.await.expect("terminal tool task should complete");
 
-    let deadline = std::time::Instant::now() + Duration::from_millis(1000);
-    loop {
-        if let Some(result) = task_future.as_mut().now_or_never() {
-            let result = result.expect("terminal tool task should complete");
-
-            let inputs = handle.inputs();
-            assert!(
-                inputs.iter().any(|s| s.contains("q")),
-                "expected 'q' to be sent to terminal, got: {:?}",
-                inputs
-            );
-
-            assert!(
-                result.contains("Input \"q\" was sent"),
-                "expected result to indicate input was sent, got: {result}"
-            );
-            assert!(
-                result.contains("exited successfully") || result.contains("README.md contents"),
-                "expected result to show success or terminal content, got: {result}"
-            );
-            return;
-        }
-
-        if std::time::Instant::now() >= deadline {
-            panic!("timed out waiting for terminal tool task to complete");
-        }
-
-        cx.run_until_parked();
-        cx.background_executor.timer(Duration::from_millis(1)).await;
-    }
-}
-
-/// Test that simulates a conversation where the model calls the terminal tool
-/// to run `less README.md`, which blocks waiting for user input.
-/// The test verifies that the timeout is hit and the process is killed.
-#[gpui::test]
-async fn test_terminal_tool_less_command_times_out(cx: &mut TestAppContext) {
-    cx.executor().allow_parking();
-    init_test(cx);
-    always_allow_tools(cx);
-
-    // Find the zed repo root by looking for README.md relative to the crate
-    let zed_repo_root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .parent()
-        .unwrap()
-        .parent()
-        .unwrap()
-        .to_path_buf();
-
+    let inputs = handle.inputs();
     assert!(
-        zed_repo_root.join("README.md").exists(),
-        "Could not find README.md at {:?}",
-        zed_repo_root
+        inputs.iter().any(|s| s.contains("q")),
+        "expected 'q' to be sent to terminal, got: {:?}",
+        inputs
     );
 
-    // Create a project with RealFs pointing to the zed repo root
-    let real_fs = Arc::new(RealFs::new(None, cx.executor()));
-    let project = Project::test(real_fs, [zed_repo_root.as_path()], cx).await;
-
-    // Get the worktree name (should be "zed" or similar)
-    let worktree_name = project.read_with(cx, |project, cx| {
-        project
-            .worktrees(cx)
-            .next()
-            .map(|wt| wt.read(cx).root_name_str().to_owned())
-            .unwrap_or_default()
-    });
-
-    // Create an AcpThread using the stub connection (production path for terminal creation)
-    let connection = Rc::new(StubAgentConnection::new());
-    let acp_thread = cx
-        .update(|cx| {
-            connection
-                .clone()
-                .new_thread(project.clone(), zed_repo_root.as_path(), cx)
-        })
-        .await
-        .unwrap();
-
-    // Use the production AcpThreadEnvironment
-    // Note: We must keep acp_thread alive since AcpThreadEnvironment only holds a WeakEntity
-    let environment = Rc::new(crate::AcpThreadEnvironment::new(acp_thread.clone()));
-    let _acp_thread = acp_thread; // Keep the strong reference alive
-
-    #[allow(clippy::arc_with_non_send_sync)]
-    let tool = Arc::new(crate::TerminalTool::new(project, environment));
-    let (event_stream, _rx) = crate::ToolCallEventStream::test();
-
-    // Simulate user message: "Please run `less README.md`"
-    // Model responds with terminal tool call
-    let timeout_ms = 2000; // 2 second timeout
-
-    let task = cx.update(|cx| {
-        tool.run(
-            crate::TerminalToolInput {
-                action: crate::TerminalAction::RunCmd {
-                    command: "less README.md".to_string(),
-                    cd: worktree_name,
-                },
-                timeout_ms: Some(timeout_ms),
-            },
-            event_stream,
-            cx,
-        )
-    });
-
-    // Wait for the task to complete - it should hit the timeout and return
-    // We use a test-level timeout that's longer than the tool timeout to catch hangs
-    let test_timeout = Duration::from_millis(timeout_ms + 3000);
-    let start = std::time::Instant::now();
-
-    let mut task_pinned = std::pin::pin!(task.fuse());
-
-    let result = loop {
-        // Check if task is ready
-        futures::select_biased! {
-            result = task_pinned.as_mut() => break result,
-            _ = cx.background_executor.timer(Duration::from_millis(100)).fuse() => {
-                cx.run_until_parked();
-            }
-        }
-
-        if start.elapsed() > test_timeout {
-            panic!(
-                "Test timed out after {:?} waiting for terminal tool - `less` should have been killed by the {} ms timeout",
-                start.elapsed(),
-                timeout_ms
-            );
-        }
-    };
-
-    let result = result.expect("terminal tool task should complete without error");
-    // The result should indicate the command failed because `less` doesn't exit on its own -
-    // it waits for user input and gets killed by the timeout. The production code path
-    // (via portable_pty) reports this as "failed with exit code" rather than "interrupted".
     assert!(
-        result.contains("failed"),
-        "expected result to indicate command failed, got: {result}"
+        result.contains("Input \"q\" was sent"),
+        "expected result to indicate input was sent, got: {result}"
+    );
+    assert!(
+        result.contains("exited successfully") || result.contains("README.md contents"),
+        "expected result to show success or terminal content, got: {result}"
     );
 }
 
@@ -2292,8 +2176,8 @@ async fn test_terminal_tool_cancellation_captures_output(cx: &mut TestAppContext
         LanguageModelToolUse {
             id: "terminal_tool_1".into(),
             name: TerminalTool::NAME.into(),
-            raw_input: r#"{"command": "sleep 1000", "cd": "."}"#.into(),
-            input: json!({"command": "sleep 1000", "cd": "."}),
+            raw_input: r#"{"action": {"type": "RunCmd", "command": "sleep 1000", "cd": "."}, "timeout_ms": null}"#.into(),
+            input: json!({"action": {"type": "RunCmd", "command": "sleep 1000", "cd": "."}, "timeout_ms": null}),
             is_input_complete: true,
             thought_signature: None,
         },
@@ -2575,8 +2459,8 @@ async fn test_truncate_while_terminal_tool_running(cx: &mut TestAppContext) {
         LanguageModelToolUse {
             id: "terminal_tool_1".into(),
             name: TerminalTool::NAME.into(),
-            raw_input: r#"{"command": "sleep 1000", "cd": "."}"#.into(),
-            input: json!({"command": "sleep 1000", "cd": "."}),
+            raw_input: r#"{"action": {"type": "RunCmd", "command": "sleep 1000", "cd": "."}, "timeout_ms": null}"#.into(),
+            input: json!({"action": {"type": "RunCmd", "command": "sleep 1000", "cd": "."}, "timeout_ms": null}),
             is_input_complete: true,
             thought_signature: None,
         },
@@ -2639,8 +2523,8 @@ async fn test_cancel_multiple_concurrent_terminal_tools(cx: &mut TestAppContext)
         LanguageModelToolUse {
             id: "terminal_tool_1".into(),
             name: TerminalTool::NAME.into(),
-            raw_input: r#"{"command": "sleep 1000", "cd": "."}"#.into(),
-            input: json!({"command": "sleep 1000", "cd": "."}),
+            raw_input: r#"{"action": {"type": "RunCmd", "command": "sleep 1000", "cd": "."}, "timeout_ms": null}"#.into(),
+            input: json!({"action": {"type": "RunCmd", "command": "sleep 1000", "cd": "."}, "timeout_ms": null}),
             is_input_complete: true,
             thought_signature: None,
         },
@@ -2649,8 +2533,8 @@ async fn test_cancel_multiple_concurrent_terminal_tools(cx: &mut TestAppContext)
         LanguageModelToolUse {
             id: "terminal_tool_2".into(),
             name: TerminalTool::NAME.into(),
-            raw_input: r#"{"command": "sleep 2000", "cd": "."}"#.into(),
-            input: json!({"command": "sleep 2000", "cd": "."}),
+            raw_input: r#"{"action": {"type": "RunCmd", "command": "sleep 2000", "cd": "."}, "timeout_ms": null}"#.into(),
+            input: json!({"action": {"type": "RunCmd", "command": "sleep 2000", "cd": "."}, "timeout_ms": null}),
             is_input_complete: true,
             thought_signature: None,
         },
@@ -2752,8 +2636,8 @@ async fn test_terminal_tool_stopped_via_terminal_card_button(cx: &mut TestAppCon
         LanguageModelToolUse {
             id: "terminal_tool_1".into(),
             name: TerminalTool::NAME.into(),
-            raw_input: r#"{"command": "sleep 1000", "cd": "."}"#.into(),
-            input: json!({"command": "sleep 1000", "cd": "."}),
+            raw_input: r#"{"action": {"type": "RunCmd", "command": "sleep 1000", "cd": "."}, "timeout_ms": null}"#.into(),
+            input: json!({"action": {"type": "RunCmd", "command": "sleep 1000", "cd": "."}, "timeout_ms": null}),
             is_input_complete: true,
             thought_signature: None,
         },
@@ -2846,8 +2730,8 @@ async fn test_terminal_tool_timeout_expires(cx: &mut TestAppContext) {
         LanguageModelToolUse {
             id: "terminal_tool_1".into(),
             name: TerminalTool::NAME.into(),
-            raw_input: r#"{"command": "sleep 1000", "cd": ".", "timeout_ms": 100}"#.into(),
-            input: json!({"command": "sleep 1000", "cd": ".", "timeout_ms": 100}),
+            raw_input: r#"{"action": {"type": "RunCmd", "command": "sleep 1000", "cd": "."}, "timeout_ms": 100}"#.into(),
+            input: json!({"action": {"type": "RunCmd", "command": "sleep 1000", "cd": "."}, "timeout_ms": 100}),
             is_input_complete: true,
             thought_signature: None,
         },
@@ -2869,10 +2753,10 @@ async fn test_terminal_tool_timeout_expires(cx: &mut TestAppContext) {
     // Collect remaining events
     let remaining_events = collect_events_until_stop(&mut events, cx).await;
 
-    // Verify the terminal was killed due to timeout
+    // Verify the terminal was NOT killed on timeout (process kept alive)
     assert!(
-        handle.was_killed(),
-        "expected terminal handle to be killed on timeout"
+        !handle.was_killed(),
+        "terminal should NOT be killed on timeout"
     );
 
     // Verify we got an EndTurn (the tool completed, just with timeout)
@@ -2906,8 +2790,8 @@ async fn test_terminal_tool_timeout_expires(cx: &mut TestAppContext) {
         };
 
         assert!(
-            result_text.contains("timed out"),
-            "expected tool result to indicate timeout, got: {result_text}"
+            result_text.contains("still running"),
+            "expected tool result to indicate process is still running, got: {result_text}"
         );
         assert!(
             !result_text.contains("The user stopped"),
@@ -4315,8 +4199,10 @@ async fn test_terminal_tool_permission_rules(cx: &mut TestAppContext) {
         let task = cx.update(|cx| {
             tool.run(
                 crate::TerminalToolInput {
-                    command: "rm -rf /".to_string(),
-                    cd: ".".to_string(),
+                    action: crate::TerminalAction::RunCmd {
+                        command: "rm -rf /".to_string(),
+                        cd: ".".to_string(),
+                    },
                     timeout_ms: None,
                 },
                 event_stream,
@@ -4367,8 +4253,10 @@ async fn test_terminal_tool_permission_rules(cx: &mut TestAppContext) {
         let task = cx.update(|cx| {
             tool.run(
                 crate::TerminalToolInput {
-                    command: "echo hello".to_string(),
-                    cd: ".".to_string(),
+                    action: crate::TerminalAction::RunCmd {
+                        command: "echo hello".to_string(),
+                        cd: ".".to_string(),
+                    },
                     timeout_ms: None,
                 },
                 event_stream,
@@ -4425,8 +4313,10 @@ async fn test_terminal_tool_permission_rules(cx: &mut TestAppContext) {
         let _task = cx.update(|cx| {
             tool.run(
                 crate::TerminalToolInput {
-                    command: "sudo rm file".to_string(),
-                    cd: ".".to_string(),
+                    action: crate::TerminalAction::RunCmd {
+                        command: "sudo rm file".to_string(),
+                        cd: ".".to_string(),
+                    },
                     timeout_ms: None,
                 },
                 event_stream,
@@ -4472,8 +4362,10 @@ async fn test_terminal_tool_permission_rules(cx: &mut TestAppContext) {
         let task = cx.update(|cx| {
             tool.run(
                 crate::TerminalToolInput {
-                    command: "echo hello".to_string(),
-                    cd: ".".to_string(),
+                    action: crate::TerminalAction::RunCmd {
+                        command: "echo hello".to_string(),
+                        cd: ".".to_string(),
+                    },
                     timeout_ms: None,
                 },
                 event_stream,

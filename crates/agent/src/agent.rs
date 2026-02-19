@@ -1744,6 +1744,17 @@ impl ThreadEnvironment for NativeThreadEnvironment {
             .read_with(cx, |thread, _cx| thread.terminal(terminal_id.clone()))??;
         Ok(Rc::new(AcpTerminalHandle::new(terminal, None)) as _)
     }
+
+    fn kill_all_terminals(&self, cx: &AsyncApp) -> Result<()> {
+        cx.update(|cx| {
+            self.acp_thread
+                .update(cx, |thread, cx| {
+                    thread.release_all_terminals(cx);
+                })
+                .log_err();
+        });
+        Ok(())
+    }
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -1823,7 +1834,6 @@ pub struct AcpTerminalHandle {
 
 impl AcpTerminalHandle {
     /// Creates a new AcpTerminalHandle wrapping the given terminal.
-    /// The drop_tx is used to signal when the handle is dropped so the terminal can be released.
     pub fn new(
         terminal: Entity<acp_thread::Terminal>,
         drop_tx: Option<oneshot::Sender<()>>,
@@ -1865,9 +1875,7 @@ impl TerminalHandle for AcpTerminalHandle {
         cx.update(|cx| {
             self.terminal.update(cx, |terminal, cx| {
                 terminal.inner().update(cx, |inner_terminal, _cx| {
-                    let mut bytes = input.as_bytes().to_vec();
-                    bytes.push(b'\n');
-                    inner_terminal.input(bytes);
+                    inner_terminal.input(input.as_bytes().to_vec());
                 });
             });
         });

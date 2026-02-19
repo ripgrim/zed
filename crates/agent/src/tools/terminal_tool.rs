@@ -49,6 +49,7 @@ pub struct TerminalToolInput {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
+#[serde(tag = "type")]
 pub enum TerminalAction {
     /// Executes a command in a terminal.
     /// For example, "git status" would run `git status`.
@@ -256,14 +257,33 @@ impl AgentTool for TerminalTool {
                 let input = input.clone();
 
                 let title: SharedString =
-                    MarkdownInlineCode(&format!("Send input {:?} to current process", input))
+                    MarkdownInlineCode(&format!("Send input '{}' to current process", input))
                         .to_string()
                         .into();
-                let context = crate::ToolPermissionContext::new(Self::NAME, vec![input.clone()]);
-                let authorize = event_stream.authorize(title, context, cx);
+
+                let settings = AgentSettings::get_global(cx);
+                let decision = decide_permission_from_settings(
+                    Self::NAME,
+                    std::slice::from_ref(&input),
+                    settings,
+                );
+
+                let authorize = match decision {
+                    ToolPermissionDecision::Allow => None,
+                    ToolPermissionDecision::Deny(reason) => {
+                        return Task::ready(Err(anyhow::anyhow!("{}", reason)));
+                    }
+                    ToolPermissionDecision::Confirm => {
+                        let context =
+                            crate::ToolPermissionContext::new(Self::NAME, vec![input.clone()]);
+                        Some(event_stream.authorize(title, context, cx))
+                    }
+                };
 
                 cx.spawn(async move |cx| {
-                    authorize.await?;
+                    if let Some(authorize) = authorize {
+                        authorize.await?;
+                    }
 
                     let terminal = self.environment.get_terminal(&terminal_id, cx)?;
                     terminal.send_input(&input, cx)?;
@@ -275,6 +295,16 @@ impl AgentTool for TerminalTool {
                         futures::select! {
                             status = wait_for_exit.clone().fuse() => (true, status),
                             _ = timeout_task.fuse() => (false, acp::TerminalExitStatus::new()),
+                            _ = event_stream.cancelled_by_user().fuse() => {
+                                terminal.kill(cx)?;
+                                terminal.wait_for_exit(cx)?.await;
+                                let output = terminal.current_output(cx)?;
+                                return Ok(format!(
+                                    "The user stopped this operation. Input \"{}\" was sent before stopping.\n\nTerminal output:\n\n```\n{}\n```",
+                                    input,
+                                    output.output.trim()
+                                ));
+                            },
                         }
                     };
 
@@ -306,9 +336,8 @@ fn process_run_cmd_result(
         String::new()
     } else if output.truncated {
         format!(
-            "Output truncated. The first {} bytes:\n\n```\n{}\n```",
-            content.len(),
-            content
+            "Output truncated (limit: {} bytes):\n\n```\n{}\n```",
+            COMMAND_OUTPUT_LIMIT, content
         )
     } else {
         format!("```\n{}\n```", content)
@@ -358,12 +387,14 @@ fn process_run_cmd_result(
             }
         }
     } else {
-        let timeout_ms = timeout.map(|t| t.as_millis()).unwrap_or(0);
+        let timeout_ms = timeout
+            .expect("timeout must be Some when process hasn't exited")
+            .as_millis();
         let still_running_msg = format!(
             "The command is still running after {} ms. Terminal ID: {}\n\n\
             You can:\n\
             - Use SendInput with terminal_id \"{}\" to send input (e.g., \"q\" to quit, or Ctrl+C as \"\\x03\")\n\
-            - Make a different tool call or respond with text (this will kill the process)",
+            - Make a different tool call or respond with text (this will automatically clean up the process)",
             timeout_ms, terminal_id, terminal_id
         );
         if content_block.is_empty() {
@@ -389,9 +420,8 @@ fn process_send_input_result(
         String::new()
     } else if output.truncated {
         format!(
-            "Output truncated. The first {} bytes:\n\n```\n{}\n```",
-            content.len(),
-            content
+            "Output truncated (limit: {} bytes):\n\n```\n{}\n```",
+            COMMAND_OUTPUT_LIMIT, content
         )
     } else {
         format!("```\n{}\n```", content)

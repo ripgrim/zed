@@ -3350,6 +3350,13 @@ impl AcpThreadView {
     }
 }
 
+fn terminal_action_label(raw_input: Option<&serde_json::Value>) -> &'static str {
+    raw_input
+        .and_then(agent::TerminalAction::parse_from_json)
+        .map(|action| action.ui_label())
+        .unwrap_or("Run Command")
+}
+
 impl AcpThreadView {
     pub(crate) fn render_entries(&mut self, cx: &mut Context<Self>) -> List {
         list(
@@ -4535,12 +4542,7 @@ impl AcpThreadView {
             .and_then(|s| s.strip_suffix("\n```"))
             .unwrap_or(&command_source);
 
-        let action_label = tool_call
-            .raw_input
-            .as_ref()
-            .and_then(agent::TerminalAction::parse_from_json)
-            .map(|action| action.ui_label())
-            .unwrap_or("Run Command");
+        let action_label = terminal_action_label(tool_call.raw_input.as_ref());
         let command_element = self.render_collapsible_command(
             false,
             command_content,
@@ -5006,12 +5008,7 @@ impl AcpThreadView {
             .map(|this| {
                 if is_terminal_tool {
                     let label_source = tool_call.label.read(cx).source();
-                    let action_label = tool_call
-                        .raw_input
-                        .as_ref()
-                        .and_then(agent::TerminalAction::parse_from_json)
-                        .map(|action| action.ui_label())
-                        .unwrap_or("Run Command");
+                    let action_label = terminal_action_label(tool_call.raw_input.as_ref());
                     this.child(self.render_collapsible_command(true, label_source, &tool_call.id, action_label, cx))
                 } else {
                     this.child(

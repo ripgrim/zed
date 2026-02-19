@@ -1,16 +1,16 @@
 #![allow(rustdoc::private_intra_doc_links)]
-//! THIS IS THE PLACE WHERE EVERYTHING EDITOR-RELATED IS STORED (DATA-WISE) AND DISPLAYED (UI-WISE).
-//! THE MAIN POINT OF INTEREST IN THIS CRATE IS [`Editor`] TYPE, WHICH IS USED IN EVERY OTHER ZED PART AS A USER INPUT ELEMENT.
-//! IT COMES IN DIFFERENT FLAVORS: SINGLE LINE, MULTILINE AND A FIXED HEIGHT ONE.
+//! This is the place where everything editor-related is stored (data-wise) and displayed (ui-wise).
+//! The main point of interest in this crate is [`Editor`] type, which is used in every other Zed part as a user input element.
+//! It comes in different flavors: single line, multiline and a fixed height one.
 //!
-//! EDITOR CONTAINS OF MULTIPLE LARGE SUBMODULES:
-//! * [`element`] — THE PLACE WHERE ALL RENDERING HAPPENS
-//! * [`display_map`] - CHUNKS UP TEXT IN THE EDITOR INTO THE LOGICAL BLOCKS, ESTABLISHES COORDINATES AND MAPPING BETWEEN EACH OF THEM.
-//!   CONTAINS ALL METADATA RELATED TO TEXT TRANSFORMATIONS (FOLDS, FAKE INLAY TEXT INSERTIONS, SOFT WRAPS, TAB MARKUP, ETC.).
+//! Editor contains of multiple large submodules:
+//! * [`element`] — the place where all rendering happens
+//! * [`display_map`] - chunks up text in the editor into the logical blocks, establishes coordinates and mapping between each of them.
+//!   Contains all metadata related to text transformations (folds, fake inlay text insertions, soft wraps, tab markup, etc.).
 //!
-//! ALL OTHER SUBMODULES AND STRUCTS ARE MOSTLY CONCERNED WITH HOLDING EDITOR DATA ABOUT THE WAY IT DISPLAYS CURRENT BUFFER REGION(S).
+//! All other submodules and structs are mostly concerned with holding editor data about the way it displays current buffer region(s).
 //!
-//! IF YOU'RE LOOKING TO IMPROVE VIM MODE, YOU SHOULD CHECK OUT VIM CRATE THAT WRAPS EDITOR AND OVERRIDES ITS BEHAVIOR.
+//! If you're looking to improve Vim mode, you should check out Vim crate that wraps Editor and overrides its behavior.
 pub mod actions;
 pub mod blink_manager;
 mod bracket_colorization;

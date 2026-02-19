@@ -609,6 +609,17 @@ pub trait ThreadEnvironment {
         allowed_tools: Option<Vec<String>>,
         cx: &mut App,
     ) -> Result<Rc<dyn SubagentHandle>>;
+
+    fn kill_all_terminals(&self, cx: &AsyncApp) -> Result<()>;
+}
+
+fn is_terminal_send_input(tool_name: &str, input: &serde_json::Value) -> bool {
+    tool_name == "terminal"
+        && input
+            .get("action")
+            .and_then(|a| a.get("type"))
+            .and_then(|t| t.as_str())
+            == Some("SendInput")
 }
 
 #[derive(Debug)]
@@ -877,6 +888,7 @@ pub struct Thread {
     subagent_context: Option<SubagentContext>,
     /// Weak references to running subagent threads for cancellation propagation
     running_subagents: Vec<WeakEntity<Thread>>,
+    environment: Option<Rc<dyn ThreadEnvironment>>,
 }
 
 impl Thread {
@@ -967,6 +979,7 @@ impl Thread {
             imported: false,
             subagent_context: None,
             running_subagents: Vec::new(),
+            environment: None,
         }
     }
 
@@ -1191,6 +1204,7 @@ impl Thread {
             imported: db_thread.imported,
             subagent_context: db_thread.subagent_context,
             running_subagents: Vec::new(),
+            environment: None,
         }
     }
 
@@ -1313,6 +1327,7 @@ impl Thread {
         environment: Rc<dyn ThreadEnvironment>,
         cx: &mut Context<Self>,
     ) {
+        self.environment = Some(environment.clone());
         let language_registry = self.project.read(cx).languages().clone();
         self.add_tool(
             CopyPathTool::new(self.project.clone()),
@@ -1889,6 +1904,9 @@ impl Thread {
                     }
                 })?;
             } else if end_turn {
+                if let Ok(Some(env)) = this.read_with(cx, |this, _| this.environment.clone()) {
+                    env.kill_all_terminals(cx).log_err();
+                }
                 return Ok(());
             } else {
                 let has_queued = this.update(cx, |this, _| this.has_queued_message())?;
@@ -2117,9 +2135,18 @@ impl Thread {
             acp::ToolCallUpdateFields::new().status(acp::ToolCallStatus::InProgress),
         );
         let supports_images = self.model().is_some_and(|model| model.supports_images());
+        let should_kill_terminals = !is_terminal_send_input(&tool_use.name, &tool_use.input);
+        let environment = if should_kill_terminals {
+            self.environment.clone()
+        } else {
+            None
+        };
         let tool_result = tool.run(tool_use.input, tool_event_stream, cx);
         log::debug!("Running tool {}", tool_use.name);
-        Some(cx.foreground_executor().spawn(async move {
+        Some(cx.spawn(async move |_this, cx| {
+            if let Some(env) = environment {
+                env.kill_all_terminals(cx).log_err();
+            }
             let tool_result = tool_result.await.and_then(|output| {
                 if let LanguageModelToolResultContent::Image(_) = &output.llm_output
                     && !supports_images
