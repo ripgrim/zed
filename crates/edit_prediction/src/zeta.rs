@@ -35,7 +35,7 @@ pub fn max_editable_tokens(format: ZetaFormat) -> usize {
     }
 }
 
-pub fn request_prediction_with_zeta2(
+pub fn request_prediction_with_zeta(
     store: &mut EditPredictionStore,
     EditPredictionModelInput {
         buffer,

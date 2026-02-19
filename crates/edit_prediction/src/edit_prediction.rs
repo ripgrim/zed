@@ -70,7 +70,7 @@ pub mod udiff;
 
 mod capture_example;
 mod zed_edit_prediction_delegate;
-pub mod zeta2;
+pub mod zeta;
 
 #[cfg(test)]
 mod edit_prediction_tests;
@@ -1312,7 +1312,7 @@ impl EditPredictionStore {
             }
             EditPredictionModel::Zeta1 { server } | EditPredictionModel::Zeta2 { server } => {
                 if server == EditPredictionServer::Cloud {
-                    zeta2::edit_prediction_accepted(self, current_prediction, cx)
+                    zeta::edit_prediction_accepted(self, current_prediction, cx)
                 }
             }
             EditPredictionModel::Fim { .. } => {}
@@ -1874,14 +1874,14 @@ impl EditPredictionStore {
         };
 
         let task = match self.edit_prediction_model {
-            EditPredictionModel::Zeta1 { server } => zeta2::request_prediction_with_zeta2(
+            EditPredictionModel::Zeta1 { server } => zeta::request_prediction_with_zeta(
                 self,
                 inputs,
                 Some(zeta_prompt::EditPredictionModelKind::Zeta1),
                 server,
                 cx,
             ),
-            EditPredictionModel::Zeta2 { server } => zeta2::request_prediction_with_zeta2(
+            EditPredictionModel::Zeta2 { server } => zeta::request_prediction_with_zeta(
                 self,
                 inputs,
                 Some(zeta_prompt::EditPredictionModelKind::Zeta2),
