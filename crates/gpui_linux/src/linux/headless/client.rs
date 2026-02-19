@@ -102,15 +102,15 @@ impl LinuxClient for HeadlessClient {
 
     fn reveal_path(&self, _path: std::path::PathBuf) {}
 
-    fn write_to_primary(&self, _item: crate::ClipboardItem) {}
+    fn write_to_primary(&self, _item: gpui::ClipboardItem) {}
 
-    fn write_to_clipboard(&self, _item: crate::ClipboardItem) {}
+    fn write_to_clipboard(&self, _item: gpui::ClipboardItem) {}
 
-    fn read_from_primary(&self) -> Option<crate::ClipboardItem> {
+    fn read_from_primary(&self) -> Option<gpui::ClipboardItem> {
         None
     }
 
-    fn read_from_clipboard(&self) -> Option<crate::ClipboardItem> {
+    fn read_from_clipboard(&self) -> Option<gpui::ClipboardItem> {
         None
     }
 

@@ -1598,7 +1598,7 @@ impl LinuxClient for X11Client {
         reveal_path_internal(self.background_executor(), path, None);
     }
 
-    fn write_to_primary(&self, item: crate::ClipboardItem) {
+    fn write_to_primary(&self, item: gpui::ClipboardItem) {
         let state = self.0.borrow_mut();
         state
             .clipboard
@@ -1611,7 +1611,7 @@ impl LinuxClient for X11Client {
             .log_with_level(log::Level::Debug);
     }
 
-    fn write_to_clipboard(&self, item: crate::ClipboardItem) {
+    fn write_to_clipboard(&self, item: gpui::ClipboardItem) {
         let mut state = self.0.borrow_mut();
         state
             .clipboard
@@ -1625,7 +1625,7 @@ impl LinuxClient for X11Client {
         state.clipboard_item.replace(item);
     }
 
-    fn read_from_primary(&self) -> Option<crate::ClipboardItem> {
+    fn read_from_primary(&self) -> Option<gpui::ClipboardItem> {
         let state = self.0.borrow_mut();
         state
             .clipboard
@@ -1634,7 +1634,7 @@ impl LinuxClient for X11Client {
             .log_with_level(log::Level::Debug)
     }
 
-    fn read_from_clipboard(&self) -> Option<crate::ClipboardItem> {
+    fn read_from_clipboard(&self) -> Option<gpui::ClipboardItem> {
         let state = self.0.borrow_mut();
         // if the last copy was from this app, return our cached item
         // which has metadata attached.
