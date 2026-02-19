@@ -545,12 +545,12 @@ fn cosmic_style(style: FontStyle) -> cosmic_text::Style {
     }
 }
 
-fn font_into_properties(font: &crate::Font) -> font_kit::properties::Properties {
+fn font_into_properties(font: &gpui::Font) -> font_kit::properties::Properties {
     font_kit::properties::Properties {
         style: match font.style {
-            crate::FontStyle::Normal => font_kit::properties::Style::Normal,
-            crate::FontStyle::Italic => font_kit::properties::Style::Italic,
-            crate::FontStyle::Oblique => font_kit::properties::Style::Oblique,
+            gpui::FontStyle::Normal => font_kit::properties::Style::Normal,
+            gpui::FontStyle::Italic => font_kit::properties::Style::Italic,
+            gpui::FontStyle::Oblique => font_kit::properties::Style::Oblique,
         },
         weight: font_kit::properties::Weight(font.weight.0),
         stretch: Default::default(),

@@ -139,12 +139,12 @@ impl LinuxDispatcher {
 }
 
 impl PlatformDispatcher for LinuxDispatcher {
-    fn get_all_timings(&self) -> Vec<crate::ThreadTaskTimings> {
+    fn get_all_timings(&self) -> Vec<gpui::ThreadTaskTimings> {
         let global_timings = GLOBAL_THREAD_TIMINGS.lock();
         ThreadTaskTimings::convert(&global_timings)
     }
 
-    fn get_current_thread_timings(&self) -> crate::ThreadTaskTimings {
+    fn get_current_thread_timings(&self) -> gpui::ThreadTaskTimings {
         THREAD_TIMINGS.with(|timings| {
             let timings = timings.lock();
             let thread_name = timings.thread_name.clone();
@@ -157,7 +157,7 @@ impl PlatformDispatcher for LinuxDispatcher {
             vec.extend_from_slice(s1);
             vec.extend_from_slice(s2);
 
-            crate::ThreadTaskTimings {
+            gpui::ThreadTaskTimings {
                 thread_name,
                 thread_id: std::thread::current().id(),
                 timings: vec,

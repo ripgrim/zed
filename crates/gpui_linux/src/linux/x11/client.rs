@@ -1,4 +1,3 @@
-use crate::{Capslock, ResultExt as _, TaskTiming, profiler};
 use anyhow::{Context as _, anyhow};
 use ashpd::WindowIdentifier;
 use calloop::{
@@ -7,6 +6,7 @@ use calloop::{
 };
 use collections::HashMap;
 use core::str;
+use gpui::{Capslock, ResultExt as _, TaskTiming, profiler};
 use http_client::Url;
 use log::Level;
 use smallvec::SmallVec;
@@ -55,10 +55,11 @@ use crate::linux::{
     reveal_path_internal,
     xdg_desktop_portal::{Event as XDPEvent, XDPEventSource},
 };
-use crate::linux::{LinuxKeyboardLayout, X11Window, modifiers_from_xinput_info};
-use crate::{
+use crate::linux::{LinuxCommon, LinuxKeyboardLayout, X11Window, modifiers_from_xinput_info};
+
+use gpui::{
     AnyWindowHandle, Bounds, ClipboardItem, CursorStyle, DisplayId, FileDropEvent, Keystroke,
-    LinuxCommon, Modifiers, ModifiersChangedEvent, MouseButton, Pixels, Platform, PlatformDisplay,
+    Modifiers, ModifiersChangedEvent, MouseButton, Pixels, Platform, PlatformDisplay,
     PlatformInput, PlatformKeyboardLayout, PlatformWindow, Point, RequestFrameOptions, ScrollDelta,
     Size, TouchPhase, WindowParams, point, px,
 };

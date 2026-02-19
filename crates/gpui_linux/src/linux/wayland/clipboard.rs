@@ -10,10 +10,8 @@ use strum::IntoEnumIterator;
 use wayland_client::{Connection, protocol::wl_data_offer::WlDataOffer};
 use wayland_protocols::wp::primary_selection::zv1::client::zwp_primary_selection_offer_v1::ZwpPrimarySelectionOfferV1;
 
-use crate::{
-    ClipboardEntry, ClipboardItem, Image, ImageFormat, hash,
-    linux::{WaylandClientStatePtr, platform::read_fd},
-};
+use crate::linux::{WaylandClientStatePtr, platform::read_fd};
+use gpui::{ClipboardEntry, ClipboardItem, Image, ImageFormat, hash};
 
 /// Text mime types that we'll offer to other programs.
 pub(crate) const TEXT_MIME_TYPES: [&str; 3] =

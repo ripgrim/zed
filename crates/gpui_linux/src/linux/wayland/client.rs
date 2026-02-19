@@ -84,14 +84,14 @@ use crate::linux::{
     },
     xdg_desktop_portal::{Event as XDPEvent, XDPEventSource},
 };
-use crate::{PlatformWindow, TaskTiming};
 use gpui::{
     AnyWindowHandle, Bounds, Capslock, CursorStyle, DOUBLE_CLICK_INTERVAL, DevicePixels, DisplayId,
     FileDropEvent, ForegroundExecutor, KeyDownEvent, KeyUpEvent, Keystroke, LinuxCommon,
     LinuxKeyboardLayout, Modifiers, ModifiersChangedEvent, MouseButton, MouseDownEvent,
     MouseExitEvent, MouseMoveEvent, MouseUpEvent, NavigationDirection, Pixels, PlatformDisplay,
-    PlatformInput, PlatformKeyboardLayout, Point, ResultExt as _, SCROLL_LINES, ScrollDelta,
-    ScrollWheelEvent, SharedString, Size, TouchPhase, WindowParams, point, profiler, px, size,
+    PlatformInput, PlatformKeyboardLayout, PlatformWindow, Point, ResultExt as _, SCROLL_LINES,
+    ScrollDelta, ScrollWheelEvent, SharedString, Size, TaskTiming, TouchPhase, WindowParams, point,
+    profiler, px, size,
 };
 use gpui_wgpu::WgpuContext;
 
@@ -2038,7 +2038,7 @@ impl Dispatch<wl_data_device::WlDataDevice, ()> for WaylandClientStatePtr {
 
                             let input = PlatformInput::FileDrop(FileDropEvent::Entered {
                                 position,
-                                paths: crate::ExternalPaths(paths),
+                                paths: gpui::ExternalPaths(paths),
                             });
 
                             let client = this.get_client();

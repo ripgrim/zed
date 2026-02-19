@@ -21,13 +21,12 @@ use util::command::{new_command, new_std_command};
 #[cfg(any(feature = "wayland", feature = "x11"))]
 use xkbcommon::xkb::{self, Keycode, Keysym, State};
 
-use crate::linux::LinuxDispatcher;
+use crate::linux::{LinuxDispatcher, PriorityQueueCalloopReceiver};
 use gpui::{
     Action, AnyWindowHandle, BackgroundExecutor, ClipboardItem, CursorStyle, DisplayId,
     ForegroundExecutor, Keymap, Menu, MenuItem, OwnedMenu, PathPromptOptions, Platform,
     PlatformDisplay, PlatformKeyboardLayout, PlatformKeyboardMapper, PlatformTextSystem,
-    PlatformWindow, PriorityQueueCalloopReceiver, Result, RunnableVariant, Task, ThermalState,
-    WindowAppearance, WindowParams,
+    PlatformWindow, Result, RunnableVariant, Task, ThermalState, WindowAppearance, WindowParams,
 };
 #[cfg(any(feature = "wayland", feature = "x11"))]
 use gpui::{Pixels, Point, px};
@@ -106,7 +105,7 @@ pub(crate) trait LinuxClient {
     #[cfg(feature = "screen-capture")]
     fn screen_capture_sources(
         &self,
-    ) -> oneshot::Receiver<Result<Vec<Rc<dyn crate::ScreenCaptureSource>>>> {
+    ) -> oneshot::Receiver<Result<Vec<Rc<dyn gpui::ScreenCaptureSource>>>> {
         let (sources_tx, sources_rx) = oneshot::channel();
         sources_tx
             .send(Err(anyhow::anyhow!(
@@ -210,7 +209,7 @@ impl<P: LinuxClient + 'static> Platform for P {
     }
 
     fn keyboard_mapper(&self) -> Rc<dyn PlatformKeyboardMapper> {
-        Rc::new(crate::DummyKeyboardMapper)
+        Rc::new(gpui::DummyKeyboardMapper)
     }
 
     fn on_keyboard_layout_change(&self, callback: Box<dyn FnMut()>) {
@@ -324,7 +323,7 @@ impl<P: LinuxClient + 'static> Platform for P {
     #[cfg(feature = "screen-capture")]
     fn screen_capture_sources(
         &self,
-    ) -> oneshot::Receiver<Result<Vec<Rc<dyn crate::ScreenCaptureSource>>>> {
+    ) -> oneshot::Receiver<Result<Vec<Rc<dyn gpui::ScreenCaptureSource>>>> {
         self.screen_capture_sources()
     }
 
@@ -377,7 +376,7 @@ impl<P: LinuxClient + 'static> Platform for P {
                     .identifier(identifier.await)
                     .modal(true)
                     .title(title)
-                    .accept_label(options.prompt.as_ref().map(crate::SharedString::as_str))
+                    .accept_label(options.prompt.as_ref().map(gpui::SharedString::as_str))
                     .multiple(options.multiple)
                     .directory(options.directories)
                     .send()
@@ -867,10 +866,10 @@ fn guess_ascii(keycode: Keycode, shift: bool) -> Option<char> {
 }
 
 #[cfg(any(feature = "wayland", feature = "x11"))]
-impl crate::Keystroke {
+impl gpui::Keystroke {
     pub(super) fn from_xkb(
         state: &State,
-        mut modifiers: crate::Modifiers,
+        mut modifiers: gpui::Modifiers,
         keycode: Keycode,
     ) -> Self {
         let key_utf32 = state.key_get_utf32(keycode);
@@ -1053,7 +1052,7 @@ impl crate::Keystroke {
 }
 
 #[cfg(any(feature = "wayland", feature = "x11"))]
-impl crate::Modifiers {
+impl gpui::Modifiers {
     pub(super) fn from_xkb(keymap_state: &State) -> Self {
         let shift = keymap_state.mod_name_is_active(xkb::MOD_NAME_SHIFT, xkb::STATE_MODS_EFFECTIVE);
         let alt = keymap_state.mod_name_is_active(xkb::MOD_NAME_ALT, xkb::STATE_MODS_EFFECTIVE);
@@ -1072,7 +1071,7 @@ impl crate::Modifiers {
 }
 
 #[cfg(any(feature = "wayland", feature = "x11"))]
-impl crate::Capslock {
+impl gpui::Capslock {
     pub(super) fn from_xkb(keymap_state: &State) -> Self {
         let on = keymap_state.mod_name_is_active(xkb::MOD_NAME_CAPS, xkb::STATE_MODS_EFFECTIVE);
         Self { on }

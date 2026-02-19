@@ -4,9 +4,9 @@ use std::rc::Rc;
 use calloop::{EventLoop, LoopHandle};
 use util::ResultExt;
 
-use crate::linux::{LinuxClient, LinuxKeyboardLayout};
+use crate::linux::{LinuxClient, LinuxCommon, LinuxKeyboardLayout};
 use gpui::{
-    AnyWindowHandle, CursorStyle, DisplayId, LinuxCommon, PlatformDisplay, PlatformKeyboardLayout,
+    AnyWindowHandle, CursorStyle, DisplayId, PlatformDisplay, PlatformKeyboardLayout,
     PlatformWindow, WindowParams,
 };
 
@@ -66,7 +66,7 @@ impl LinuxClient for HeadlessClient {
 
     fn screen_capture_sources(
         &self,
-    ) -> futures::channel::oneshot::Receiver<anyhow::Result<Vec<Rc<dyn crate::ScreenCaptureSource>>>>
+    ) -> futures::channel::oneshot::Receiver<anyhow::Result<Vec<Rc<dyn gpui::ScreenCaptureSource>>>>
     {
         let (tx, rx) = futures::channel::oneshot::channel();
         tx.send(Err(anyhow::anyhow!(
