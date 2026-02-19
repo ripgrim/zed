@@ -65,6 +65,138 @@
       "title": "Add agent worktree directory setting + worktree info persistence",
       "file": "suggestions/PR-49139.md",
       "date": "2026-02-18T22:21:39Z"
+    },
+    {
+      "pr": 48780,
+      "title": "Support LSP document symbols in breadcrumbs and outline UI",
+      "file": "suggestions/PR-48780.md",
+      "date": "2026-02-11T19:30:04Z"
+    },
+    {
+      "pr": 48619,
+      "title": "Swap `agent.single_file_review`'s default value to false",
+      "file": "suggestions/PR-48619.md",
+      "date": "2026-02-11T22:09:44Z"
+    },
+    {
+      "pr": 48978,
+      "title": "Use document symbols' ranges to derive their outline labels",
+      "file": "suggestions/PR-48978.md",
+      "date": "2026-02-12T07:36:48Z"
+    },
+    {
+      "pr": 48962,
+      "title": "agent_ui: Tone down thinking icon button",
+      "file": "suggestions/PR-48962.md",
+      "date": "2026-02-12T11:48:12Z"
+    },
+    {
+      "pr": 48988,
+      "title": "vim: Make `:bdelete` use new `workspace::CloseItemInAllPanes` command ",
+      "file": "suggestions/PR-48988.md",
+      "date": "2026-02-12T12:33:51Z"
+    },
+    {
+      "pr": 47860,
+      "title": "search: Support brace syntax in project search include/exclude patterns ",
+      "file": "suggestions/PR-47860.md",
+      "date": "2026-02-12T13:00:32Z"
+    },
+    {
+      "pr": 49015,
+      "title": "settings: Add ability to select audio input/output devices for collab",
+      "file": "suggestions/PR-49015.md",
+      "date": "2026-02-12T13:27:56Z"
+    },
+    {
+      "pr": 47095,
+      "title": "agent: Check is_error flag in MCP tool responses",
+      "file": "suggestions/PR-47095.md",
+      "date": "2026-02-12T13:46:46Z"
+    },
+    {
+      "pr": 47475,
+      "title": "Add user picked model to be used as a default for open router provider when generating comments and thread summary",
+      "file": "suggestions/PR-47475.md",
+      "date": "2026-02-12T14:02:17Z"
+    },
+    {
+      "pr": 48542,
+      "title": "bedrock: Enable 1M context window",
+      "file": "suggestions/PR-48542.md",
+      "date": "2026-02-12T14:32:24Z"
+    },
+    {
+      "pr": 46766,
+      "title": "json_schema_store: Include available LSP adapters in settings schema",
+      "file": "suggestions/PR-46766.md",
+      "date": "2026-02-12T14:58:38Z"
+    },
+    {
+      "pr": 47754,
+      "title": "Fix VSCode tasks.json parsing for tasks without explicit labels",
+      "file": "suggestions/PR-47754.md",
+      "date": "2026-02-12T16:30:47Z"
+    },
+    {
+      "pr": 48807,
+      "title": "languages: Add runnable support for bash ",
+      "file": "suggestions/PR-48807.md",
+      "date": "2026-02-12T16:46:43Z"
+    },
+    {
+      "pr": 44506,
+      "title": "Allow changing the context window size for Ollama",
+      "file": "suggestions/PR-44506.md",
+      "date": "2026-02-12T16:58:25Z"
+    },
+    {
+      "pr": 49051,
+      "title": "git_graph: Add basic keyboard navigation",
+      "file": "suggestions/PR-49051.md",
+      "date": "2026-02-12T20:29:24Z"
+    },
+    {
+      "pr": 49069,
+      "title": "Preserve panel zoom state across workspace switches",
+      "file": "suggestions/PR-49069.md",
+      "date": "2026-02-12T21:59:28Z"
+    },
+    {
+      "pr": 48842,
+      "title": "git_ui: Open commit list from Git panel and commit diff from Git Graph rows",
+      "file": "suggestions/PR-48842.md",
+      "date": "2026-02-12T23:57:19Z"
+    },
+    {
+      "pr": 48851,
+      "title": "repl: Initial stdin support for kernels",
+      "file": "suggestions/PR-48851.md",
+      "date": "2026-02-13T07:18:55Z"
+    },
+    {
+      "pr": 48736,
+      "title": "Fix Conda activation error appearing during task execution",
+      "file": "suggestions/PR-48736.md",
+      "date": "2026-02-13T11:13:18Z"
+    },
+    {
+      "pr": 47673,
+      "title": "language_models: Add image support for Bedrock",
+      "file": "suggestions/PR-47673.md",
+      "date": "2026-02-13T11:41:14Z"
+    },
+    {
+      "pr": 49094,
+      "title": "workspace: Enable adding a recent project to current workspace from modal",
+      "file": "suggestions/PR-49094.md",
+      "date": "2026-02-13T13:02:23Z"
+    },
+    {
+      "pr": 49098,
+      "title": "agent_ui: Fix max tokens error not being shown",
+      "file": "suggestions/PR-49098.md",
+      "date": "2026-02-13T13:32:31Z"
     }
   ]
 }
