@@ -22,6 +22,7 @@ use std::{path::Path, sync::Arc, time::Instant};
 use zeta_prompt::{
     CURSOR_MARKER, EditPredictionModelKind, ZetaFormat, clean_zeta2_model_output,
     format_zeta_prompt, get_prefill, prompt_input_contains_special_tokens,
+    zeta1::{self, EDITABLE_REGION_END_MARKER},
 };
 
 pub const MAX_CONTEXT_TOKENS: usize = 350;
@@ -111,8 +112,22 @@ pub fn request_prediction_with_zeta(
                 return Ok((None, None));
             }
 
+            let is_zeta1 = preferred_model == Some(EditPredictionModelKind::Zeta1);
+            let excerpt_ranges = prompt_input
+                .excerpt_ranges
+                .as_ref()
+                .ok_or_else(|| anyhow::anyhow!("excerpt_ranges missing from prompt input"))?;
+
             if let Some(debug_tx) = &debug_tx {
-                let prompt = format_zeta_prompt(&prompt_input, zeta_version);
+                let prompt = if is_zeta1 {
+                    zeta1::format_zeta1_from_input(
+                        &prompt_input,
+                        excerpt_ranges.editable_350.clone(),
+                        excerpt_ranges.editable_350_context_150.clone(),
+                    )
+                } else {
+                    format_zeta_prompt(&prompt_input, zeta_version)
+                };
                 debug_tx
                     .unbounded_send(DebugEvent::EditPredictionStarted(
                         EditPredictionStartedDebugEvent {
@@ -128,30 +143,60 @@ pub fn request_prediction_with_zeta(
 
             let (request_id, output_text, usage) =
                 if let Some(custom_settings) = &custom_server_settings {
-                    let prompt = format_zeta_prompt(&prompt_input, zeta_version);
-                    let prefill = get_prefill(&prompt_input, zeta_version);
-                    let prompt = format!("{prompt}{prefill}");
-
                     let max_tokens = custom_settings.max_output_tokens * 4;
-                    let (response_text, request_id) = send_custom_server_request(
-                        server,
-                        custom_settings,
-                        prompt,
-                        max_tokens,
-                        vec![],
-                        &http_client,
-                    )
-                    .await?;
 
-                    let request_id = EditPredictionId(request_id.into());
-                    let output_text = if response_text.is_empty() {
-                        None
+                    if is_zeta1 {
+                        let prompt = zeta1::format_zeta1_from_input(
+                            &prompt_input,
+                            excerpt_ranges.editable_350.clone(),
+                            excerpt_ranges.editable_350_context_150.clone(),
+                        );
+                        let stop_tokens = vec![
+                            EDITABLE_REGION_END_MARKER.to_string(),
+                            format!("{EDITABLE_REGION_END_MARKER}\n"),
+                            format!("{EDITABLE_REGION_END_MARKER}\n\n"),
+                            format!("{EDITABLE_REGION_END_MARKER}\n\n\n"),
+                        ];
+
+                        let (response_text, request_id) = send_custom_server_request(
+                            server,
+                            custom_settings,
+                            prompt,
+                            max_tokens,
+                            stop_tokens,
+                            &http_client,
+                        )
+                        .await?;
+
+                        let request_id = EditPredictionId(request_id.into());
+                        let output_text = zeta1::clean_zeta1_model_output(&response_text);
+
+                        (request_id, output_text, None)
                     } else {
-                        let output = format!("{prefill}{response_text}");
-                        Some(clean_zeta2_model_output(&output, zeta_version).to_string())
-                    };
+                        let prompt = format_zeta_prompt(&prompt_input, zeta_version);
+                        let prefill = get_prefill(&prompt_input, zeta_version);
+                        let prompt = format!("{prompt}{prefill}");
 
-                    (request_id, output_text, None)
+                        let (response_text, request_id) = send_custom_server_request(
+                            server,
+                            custom_settings,
+                            prompt,
+                            max_tokens,
+                            vec![],
+                            &http_client,
+                        )
+                        .await?;
+
+                        let request_id = EditPredictionId(request_id.into());
+                        let output_text = if response_text.is_empty() {
+                            None
+                        } else {
+                            let output = format!("{prefill}{response_text}");
+                            Some(clean_zeta2_model_output(&output, zeta_version).to_string())
+                        };
+
+                        (request_id, output_text, None)
+                    }
                 } else if let Some(config) = &raw_config {
                     let prompt = format_zeta_prompt(&prompt_input, config.format);
                     let prefill = get_prefill(&prompt_input, config.format);
