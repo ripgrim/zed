@@ -235,7 +235,16 @@ impl Render for AnnouncementToastNotification {
                     cx.emit(DismissEvent);
                 }
             }))
-            .secondary_on_click(cx.listener(|_, _, _window, cx| {
+            .secondary_on_click(cx.listener({
+                let url = self.content.primary_action_url.clone();
+                move |_, _, _window, cx| {
+                    if let Some(url) = &url {
+                        cx.open_url(url);
+                    }
+                    cx.emit(DismissEvent);
+                }
+            }))
+            .dismiss_on_click(cx.listener(|_, _, _window, cx| {
                 cx.emit(DismissEvent);
             }))
     }

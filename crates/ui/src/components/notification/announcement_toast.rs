@@ -13,9 +13,10 @@ pub struct AnnouncementToast {
     description: Option<SharedString>,
     bullet_items: SmallVec<[AnyElement; 6]>,
     primary_action_label: SharedString,
-    primary_on_click: Option<Box<dyn Fn(&ClickEvent, &mut Window, &mut App) + 'static>>,
+    primary_on_click: Box<dyn Fn(&ClickEvent, &mut Window, &mut App) + 'static>,
     secondary_action_label: SharedString,
-    secondary_on_click: Option<Box<dyn Fn(&ClickEvent, &mut Window, &mut App) + 'static>>,
+    secondary_on_click: Box<dyn Fn(&ClickEvent, &mut Window, &mut App) + 'static>,
+    dismiss_on_click: Box<dyn Fn(&ClickEvent, &mut Window, &mut App) + 'static>,
 }
 
 impl AnnouncementToast {
@@ -26,9 +27,10 @@ impl AnnouncementToast {
             description: None,
             bullet_items: SmallVec::new(),
             primary_action_label: "Learn More".into(),
-            primary_on_click: None,
-            secondary_action_label: "Dismiss".into(),
-            secondary_on_click: None,
+            primary_on_click: Box::new(|_, _, _| {}),
+            secondary_action_label: "View Release Notes".into(),
+            secondary_on_click: Box::new(|_, _, _| {}),
+            dismiss_on_click: Box::new(|_, _, _| {}),
         }
     }
 
@@ -67,7 +69,7 @@ impl AnnouncementToast {
         mut self,
         handler: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
     ) -> Self {
-        self.primary_on_click = Some(Box::new(handler));
+        self.primary_on_click = Box::new(handler);
         self
     }
 
@@ -83,7 +85,15 @@ impl AnnouncementToast {
         mut self,
         handler: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
     ) -> Self {
-        self.secondary_on_click = Some(Box::new(handler));
+        self.secondary_on_click = Box::new(handler);
+        self
+    }
+
+    pub fn dismiss_on_click(
+        mut self,
+        handler: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
+    ) -> Self {
+        self.dismiss_on_click = Box::new(handler);
         self
     }
 }
@@ -94,6 +104,7 @@ impl RenderOnce for AnnouncementToast {
         let illustration = self.illustration;
 
         v_flex()
+            .relative()
             .w_full()
             .elevation_3(cx)
             .when_some(illustration, |this, i| this.child(i))
@@ -125,18 +136,21 @@ impl RenderOnce for AnnouncementToast {
                                 Button::new("try-now", self.primary_action_label)
                                     .style(ButtonStyle::Outlined)
                                     .full_width()
-                                    .when_some(self.primary_on_click, |this, on_click| {
-                                        this.on_click(on_click)
-                                    }),
+                                    .on_click(self.primary_on_click),
                             )
                             .child(
-                                Button::new("dismiss", self.secondary_action_label)
+                                Button::new("release-notes", self.secondary_action_label)
                                     .full_width()
-                                    .when_some(self.secondary_on_click, |this, on_click| {
-                                        this.on_click(on_click)
-                                    }),
+                                    .on_click(self.secondary_on_click),
                             ),
                     ),
+            )
+            .child(
+                div().absolute().top_1().right_1().child(
+                    IconButton::new("dismiss", IconName::Close)
+                        .icon_size(IconSize::Small)
+                        .on_click(self.dismiss_on_click),
+                ),
             )
     }
 }
