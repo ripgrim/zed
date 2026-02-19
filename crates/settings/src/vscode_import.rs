@@ -357,7 +357,8 @@ impl VsCodeSettings {
     fn search_content(&self) -> Option<SearchSettingsContent> {
         skip_default(SearchSettingsContent {
             include_ignored: self.read_bool("search.useIgnoreFiles"),
-            ..Default::default()
+            search_on_input: self.read_bool("search.searchOnType"),
+            ..SearchSettingsContent::default()
         })
     }
 
@@ -952,6 +953,7 @@ impl VsCodeSettings {
             bottom_dock_layout: None,
             centered_layout: None,
             close_on_file_delete: None,
+            close_panel_on_toggle: None,
             command_aliases: Default::default(),
             confirm_quit: self.read_enum("window.confirmBeforeClose", |s| match s {
                 "always" | "keyboardOnly" => Some(true),
