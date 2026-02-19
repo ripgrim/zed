@@ -126,7 +126,7 @@ impl PlatformDispatcher for WindowsDispatcher {
             vec.extend_from_slice(s1);
             vec.extend_from_slice(s2);
 
-            crate::ThreadTaskTimings {
+            gpui::ThreadTaskTimings {
                 thread_name,
                 thread_id: std::thread::current().id(),
                 timings: vec,
