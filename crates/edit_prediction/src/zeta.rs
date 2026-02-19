@@ -3,13 +3,15 @@ use crate::prediction::EditPredictionResult;
 use crate::{
     CurrentEditPrediction, DebugEvent, EditPredictionFinishedDebugEvent, EditPredictionId,
     EditPredictionModelInput, EditPredictionServer, EditPredictionStartedDebugEvent,
-    EditPredictionStore,
+    EditPredictionStore, ollama,
 };
-use anyhow::Result;
-use cloud_llm_client::predict_edits_v3::RawCompletionRequest;
+use anyhow::{Context as _, Result};
+use cloud_llm_client::predict_edits_v3::{RawCompletionRequest, RawCompletionResponse};
 use cloud_llm_client::{AcceptEditPredictionBody, EditPredictionRejectReason};
 use edit_prediction_types::PredictedCursorPosition;
-use gpui::{App, Task, prelude::*};
+use futures::AsyncReadExt as _;
+use gpui::{App, AppContext as _, Task, http_client, prelude::*};
+use language::language_settings::{OpenAiCompatibleEditPredictionSettings, all_language_settings};
 use language::{BufferSnapshot, OffsetRangeExt as _, ToOffset as _, ToPoint, text_diff};
 use release_channel::AppVersion;
 use text::{Anchor, Bias};
@@ -52,6 +54,19 @@ pub fn request_prediction_with_zeta(
     server: EditPredictionServer,
     cx: &mut Context<EditPredictionStore>,
 ) -> Task<Result<Option<EditPredictionResult>>> {
+    let custom_server_settings = match server {
+        EditPredictionServer::Cloud => None,
+        EditPredictionServer::Ollama | EditPredictionServer::CustomOpenAi => {
+            let settings = &all_language_settings(None, cx).edit_predictions;
+            match server {
+                EditPredictionServer::Ollama => settings.ollama.clone(),
+                EditPredictionServer::CustomOpenAi => settings.open_ai_compatible_api.clone(),
+                EditPredictionServer::Cloud => unreachable!(),
+            }
+        }
+    };
+
+    let http_client = cx.http_client();
     let buffer_snapshotted_at = Instant::now();
     let raw_config = store.zeta2_raw_config().cloned();
 
@@ -111,55 +126,81 @@ pub fn request_prediction_with_zeta(
 
             log::trace!("Sending edit prediction request");
 
-            let (request_id, output_text, usage) = if let Some(config) = &raw_config {
-                let prompt = format_zeta_prompt(&prompt_input, config.format);
-                let prefill = get_prefill(&prompt_input, config.format);
-                let prompt = format!("{prompt}{prefill}");
-                let request = RawCompletionRequest {
-                    model: config.model_id.clone().unwrap_or_default(),
-                    prompt,
-                    temperature: None,
-                    stop: vec![],
-                    max_tokens: Some(2048),
-                    environment: Some(config.format.to_string().to_lowercase()),
-                };
+            let (request_id, output_text, usage) =
+                if let Some(custom_settings) = &custom_server_settings {
+                    let prompt = format_zeta_prompt(&prompt_input, zeta_version);
+                    let prefill = get_prefill(&prompt_input, zeta_version);
+                    let prompt = format!("{prompt}{prefill}");
 
-                let (mut response, usage) = EditPredictionStore::send_raw_llm_request(
-                    request,
-                    client,
-                    None,
-                    llm_token,
-                    app_version,
-                )
-                .await?;
+                    let max_tokens = custom_settings.max_output_tokens * 4;
+                    let (response_text, request_id) = send_custom_server_request(
+                        server,
+                        custom_settings,
+                        prompt,
+                        max_tokens,
+                        vec![],
+                        &http_client,
+                    )
+                    .await?;
 
-                let request_id = EditPredictionId(response.id.clone().into());
-                let output_text = response.choices.pop().map(|choice| {
-                    let response = &choice.text;
-                    let output = format!("{prefill}{response}");
-                    clean_zeta2_model_output(&output, config.format).to_string()
-                });
+                    let request_id = EditPredictionId(request_id.into());
+                    let output_text = if response_text.is_empty() {
+                        None
+                    } else {
+                        let output = format!("{prefill}{response_text}");
+                        Some(clean_zeta2_model_output(&output, zeta_version).to_string())
+                    };
 
-                (request_id, output_text, usage)
-            } else {
-                // Use V3 endpoint - server handles model/version selection and suffix stripping
-                let (response, usage) = EditPredictionStore::send_v3_request(
-                    prompt_input.clone(),
-                    client,
-                    llm_token,
-                    app_version,
-                    trigger,
-                )
-                .await?;
+                    (request_id, output_text, None)
+                } else if let Some(config) = &raw_config {
+                    let prompt = format_zeta_prompt(&prompt_input, config.format);
+                    let prefill = get_prefill(&prompt_input, config.format);
+                    let prompt = format!("{prompt}{prefill}");
+                    let request = RawCompletionRequest {
+                        model: config.model_id.clone().unwrap_or_default(),
+                        prompt,
+                        temperature: None,
+                        stop: vec![],
+                        max_tokens: Some(2048),
+                        environment: Some(config.format.to_string().to_lowercase()),
+                    };
 
-                let request_id = EditPredictionId(response.request_id.into());
-                let output_text = if response.output.is_empty() {
-                    None
+                    let (mut response, usage) = EditPredictionStore::send_raw_llm_request(
+                        request,
+                        client,
+                        None,
+                        llm_token,
+                        app_version,
+                    )
+                    .await?;
+
+                    let request_id = EditPredictionId(response.id.clone().into());
+                    let output_text = response.choices.pop().map(|choice| {
+                        let response = &choice.text;
+                        let output = format!("{prefill}{response}");
+                        clean_zeta2_model_output(&output, config.format).to_string()
+                    });
+
+                    (request_id, output_text, usage)
                 } else {
-                    Some(response.output)
+                    // Use V3 endpoint - server handles model/version selection and suffix stripping
+                    let (response, usage) = EditPredictionStore::send_v3_request(
+                        prompt_input.clone(),
+                        client,
+                        llm_token,
+                        app_version,
+                        trigger,
+                    )
+                    .await?;
+
+                    let request_id = EditPredictionId(response.request_id.into());
+                    let output_text = if response.output.is_empty() {
+                        None
+                    } else {
+                        Some(response.output)
+                    };
+                    (request_id, output_text, usage)
                 };
-                (request_id, output_text, usage)
-            };
 
             let received_response_at = Instant::now();
 
@@ -320,6 +361,67 @@ pub fn zeta2_prompt_input(
         can_collect_data,
     };
     (editable_offset_range, prompt_input)
+}
+
+pub(crate) async fn send_custom_server_request(
+    server: EditPredictionServer,
+    settings: &OpenAiCompatibleEditPredictionSettings,
+    prompt: String,
+    max_tokens: u32,
+    stop_tokens: Vec<String>,
+    http_client: &Arc<dyn http_client::HttpClient>,
+) -> Result<(String, String)> {
+    match server {
+        EditPredictionServer::Ollama => {
+            let response =
+                ollama::make_request(settings.clone(), prompt, stop_tokens, http_client.clone())
+                    .await?;
+            Ok((response.response, response.created_at))
+        }
+        EditPredictionServer::CustomOpenAi => {
+            let request = RawCompletionRequest {
+                model: settings.model.clone(),
+                prompt,
+                max_tokens: Some(max_tokens),
+                temperature: None,
+                stop: stop_tokens
+                    .into_iter()
+                    .map(std::borrow::Cow::Owned)
+                    .collect(),
+                environment: None,
+            };
+
+            let request_body = serde_json::to_string(&request)?;
+            let http_request = http_client::Request::builder()
+                .method(http_client::Method::POST)
+                .uri(settings.api_url.as_ref())
+                .header("Content-Type", "application/json")
+                .body(http_client::AsyncBody::from(request_body))?;
+
+            let mut response = http_client.send(http_request).await?;
+            let status = response.status();
+
+            if !status.is_success() {
+                let mut body = String::new();
+                response.body_mut().read_to_string(&mut body).await?;
+                anyhow::bail!("custom server error: {} - {}", status, body);
+            }
+
+            let mut body = String::new();
+            response.body_mut().read_to_string(&mut body).await?;
+
+            let parsed: RawCompletionResponse =
+                serde_json::from_str(&body).context("Failed to parse completion response")?;
+            let text = parsed
+                .choices
+                .into_iter()
+                .next()
+                .map(|choice| choice.text)
+                .unwrap_or_default();
+            Ok((text, parsed.id))
+        }
+        EditPredictionServer::Cloud => unreachable!(),
+    }
 }
 
 pub(crate) fn edit_prediction_accepted(

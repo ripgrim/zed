@@ -1,16 +1,14 @@
 use crate::{
-    EditPredictionId, EditPredictionModelInput, cursor_excerpt, ollama,
-    prediction::EditPredictionResult,
+    EditPredictionId, EditPredictionModelInput, EditPredictionServer, cursor_excerpt,
+    prediction::EditPredictionResult, zeta,
 };
 use anyhow::{Context as _, Result, anyhow};
-use cloud_llm_client::predict_edits_v3::{RawCompletionRequest, RawCompletionResponse};
-use futures::AsyncReadExt as _;
-use gpui::{App, AppContext as _, Entity, Task, http_client};
+use gpui::{App, AppContext as _, Entity, Task};
 use language::{
     Anchor, Buffer, BufferSnapshot, OffsetRangeExt as _, ToOffset, ToPoint as _,
     language_settings::all_language_settings,
 };
-use settings::{EditPredictionPromptFormat, EditPredictionProvider};
+use settings::EditPredictionPromptFormat;
 use std::{path::Path, sync::Arc, time::Instant};
 use zeta_prompt::ZetaPromptInput;
 
@@ -35,6 +33,7 @@ pub fn request_prediction(
         ..
     }: EditPredictionModelInput,
     prompt_format: EditPredictionPromptFormat,
+    server: EditPredictionServer,
     cx: &mut App,
 ) -> Task<Result<Option<EditPredictionResult>>> {
     let settings = &all_language_settings(None, cx).edit_predictions;
@@ -49,21 +48,15 @@ pub fn request_prediction(
     let cursor_point = position.to_point(&snapshot);
     let buffer_snapshotted_at = Instant::now();
 
-    // Zeta generates more tokens than FIM models. Ideally, we'd use MAX_REWRITE_TOKENS,
-    // but this might be too slow for local deployments. So we make it configurable,
-    // but we also have this hardcoded multiplier for now.
-    let provider = settings.provider;
-    let Some(settings) = (match provider {
-        EditPredictionProvider::Ollama => settings.ollama.clone(),
-        EditPredictionProvider::OpenAiCompatibleApi => settings.open_ai_compatible_api.clone(),
-        _ => None,
+    let Some(settings) = (match server {
+        EditPredictionServer::Ollama => settings.ollama.clone(),
+        EditPredictionServer::CustomOpenAi => settings.open_ai_compatible_api.clone(),
+        EditPredictionServer::Cloud => None,
     }) else {
-        return Task::ready(Err(anyhow!("Unsupported edit prediction provider")));
+        return Task::ready(Err(anyhow!("Unsupported edit prediction server for FIM")));
     };
 
     let result = cx.background_spawn(async move {
-        // For zeta models, use the dedicated zeta1 functions which handle their own
-        // range computation with the correct token limits.
         let (excerpt_range, _) = cursor_excerpt::editable_and_context_ranges_for_cursor_position(
             cursor_point,
             &snapshot,
@@ -96,60 +89,16 @@ pub fn request_prediction(
         let prompt = format_fim_prompt(prompt_format, &prefix, &suffix);
         let stop_tokens = get_fim_stop_tokens();
 
-        let (response_text, request_id) = match provider {
-            EditPredictionProvider::Ollama => {
-                let response =
-                    ollama::make_request(settings, prompt, stop_tokens, http_client).await?;
-                (response.response, response.created_at)
-            }
-            EditPredictionProvider::OpenAiCompatibleApi => {
-                let request = RawCompletionRequest {
-                    model: settings.model.clone(),
-                    prompt,
-                    max_tokens: Some(settings.max_output_tokens),
-                    temperature: None,
-                    stop: stop_tokens
-                        .into_iter()
-                        .map(std::borrow::Cow::Owned)
-                        .collect(),
-                    environment: None,
-                };
-
-                let request_body = serde_json::to_string(&request)?;
-                let http_request = http_client::Request::builder()
-                    .method(http_client::Method::POST)
-                    .uri(settings.api_url.as_ref())
-                    .header("Content-Type", "application/json")
-                    .body(http_client::AsyncBody::from(request_body))?;
-
-                let mut response = http_client.send(http_request).await?;
-                let status = response.status();
-
-                log::debug!("fim: response status: {}", status);
-
-                if !status.is_success() {
-                    let mut body = String::new();
-                    response.body_mut().read_to_string(&mut body).await?;
-                    return Err(anyhow::anyhow!("fim API error: {} - {}", status, body));
-                }
-
-                let mut body = String::new();
-                response.body_mut().read_to_string(&mut body).await?;
-
-                let fim_response: RawCompletionResponse =
-                    serde_json::from_str(&body).context("Failed to parse fim response")?;
-                let completion = fim_response
-                    .choices
-                    .first()
-                    .ok_or_else(|| anyhow::anyhow!("fim response is missing completion"))?
-                    .text
-                    .clone();
-                (completion, fim_response.id)
-            }
-            _ => {
-                unreachable!()
-            }
-        };
+        let max_tokens = settings.max_output_tokens;
+        let (response_text, request_id) = zeta::send_custom_server_request(
+            server,
+            &settings,
+            prompt,
+            max_tokens,
+            stop_tokens,
+            &http_client,
+        )
+        .await?;
 
         let response_received_at = Instant::now();
 

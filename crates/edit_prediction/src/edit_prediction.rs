@@ -1888,7 +1888,9 @@ impl EditPredictionStore {
                 server,
                 cx,
             ),
-            EditPredictionModel::Fim { format, .. } => fim::request_prediction(inputs, format, cx),
+            EditPredictionModel::Fim { format, server } => {
+                fim::request_prediction(inputs, format, server, cx)
+            }
             EditPredictionModel::Sweep => self.sweep_ai.request_prediction_with_sweep(inputs, cx),
             EditPredictionModel::Mercury => self.mercury.request_prediction(inputs, cx),
         };
