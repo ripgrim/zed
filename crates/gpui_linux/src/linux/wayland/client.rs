@@ -73,28 +73,25 @@ use super::{
     window::{ImeInput, WaylandWindowStatePtr},
 };
 
-use crate::{
+use crate::linux::{
+    LinuxClient, get_xkb_compose_state, is_within_click_distance, open_uri_internal, read_fd,
+    reveal_path_internal,
+    wayland::{
+        clipboard::{Clipboard, DataOffer, FILE_LIST_MIME_TYPE, TEXT_MIME_TYPES},
+        cursor::Cursor,
+        serial::{SerialKind, SerialTracker},
+        window::WaylandWindow,
+    },
+    xdg_desktop_portal::{Event as XDPEvent, XDPEventSource},
+};
+use crate::{PlatformWindow, TaskTiming};
+use gpui::{
     AnyWindowHandle, Bounds, Capslock, CursorStyle, DOUBLE_CLICK_INTERVAL, DevicePixels, DisplayId,
     FileDropEvent, ForegroundExecutor, KeyDownEvent, KeyUpEvent, Keystroke, LinuxCommon,
     LinuxKeyboardLayout, Modifiers, ModifiersChangedEvent, MouseButton, MouseDownEvent,
     MouseExitEvent, MouseMoveEvent, MouseUpEvent, NavigationDirection, Pixels, PlatformDisplay,
     PlatformInput, PlatformKeyboardLayout, Point, ResultExt as _, SCROLL_LINES, ScrollDelta,
-    ScrollWheelEvent, Size, TouchPhase, WindowParams, point, profiler, px, size,
-};
-use crate::{PlatformWindow, TaskTiming};
-use crate::{
-    SharedString,
-    linux::{
-        LinuxClient, get_xkb_compose_state, is_within_click_distance, open_uri_internal, read_fd,
-        reveal_path_internal,
-        wayland::{
-            clipboard::{Clipboard, DataOffer, FILE_LIST_MIME_TYPE, TEXT_MIME_TYPES},
-            cursor::Cursor,
-            serial::{SerialKind, SerialTracker},
-            window::WaylandWindow,
-        },
-        xdg_desktop_portal::{Event as XDPEvent, XDPEventSource},
-    },
+    ScrollWheelEvent, SharedString, Size, TouchPhase, WindowParams, point, profiler, px, size,
 };
 use gpui_wgpu::WgpuContext;
 

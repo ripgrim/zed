@@ -5,7 +5,7 @@ use calloop::{EventLoop, LoopHandle};
 use util::ResultExt;
 
 use crate::linux::{LinuxClient, LinuxKeyboardLayout};
-use crate::{
+use gpui::{
     AnyWindowHandle, CursorStyle, DisplayId, LinuxCommon, PlatformDisplay, PlatformKeyboardLayout,
     PlatformWindow, WindowParams,
 };

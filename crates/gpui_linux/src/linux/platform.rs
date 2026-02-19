@@ -21,15 +21,16 @@ use util::command::{new_command, new_std_command};
 #[cfg(any(feature = "wayland", feature = "x11"))]
 use xkbcommon::xkb::{self, Keycode, Keysym, State};
 
-use crate::{
+use crate::linux::LinuxDispatcher;
+use gpui::{
     Action, AnyWindowHandle, BackgroundExecutor, ClipboardItem, CursorStyle, DisplayId,
-    ForegroundExecutor, Keymap, LinuxDispatcher, Menu, MenuItem, OwnedMenu, PathPromptOptions,
-    Platform, PlatformDisplay, PlatformKeyboardLayout, PlatformKeyboardMapper, PlatformTextSystem,
+    ForegroundExecutor, Keymap, Menu, MenuItem, OwnedMenu, PathPromptOptions, Platform,
+    PlatformDisplay, PlatformKeyboardLayout, PlatformKeyboardMapper, PlatformTextSystem,
     PlatformWindow, PriorityQueueCalloopReceiver, Result, RunnableVariant, Task, ThermalState,
     WindowAppearance, WindowParams,
 };
 #[cfg(any(feature = "wayland", feature = "x11"))]
-use crate::{Pixels, Point, px};
+use gpui::{Pixels, Point, px};
 
 #[cfg(any(feature = "wayland", feature = "x11"))]
 pub(crate) const SCROLL_LINES: f32 = 3.0;
@@ -1081,7 +1082,7 @@ impl crate::Capslock {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{Point, px};
+    use gpui::{Point, px};
 
     #[test]
     fn test_is_within_click_distance() {
