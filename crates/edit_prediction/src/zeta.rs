@@ -2,8 +2,7 @@ use crate::cursor_excerpt::{compute_excerpt_ranges, excerpt_ranges_to_byte_offse
 use crate::prediction::EditPredictionResult;
 use crate::{
     CurrentEditPrediction, DebugEvent, EditPredictionFinishedDebugEvent, EditPredictionId,
-    EditPredictionModelInput, EditPredictionServer, EditPredictionStartedDebugEvent,
-    EditPredictionStore, ollama,
+    EditPredictionModelInput, EditPredictionStartedDebugEvent, EditPredictionStore, ollama,
 };
 use anyhow::{Context as _, Result};
 use cloud_llm_client::predict_edits_v3::{RawCompletionRequest, RawCompletionResponse};
@@ -52,19 +51,16 @@ pub fn request_prediction_with_zeta(
         ..
     }: EditPredictionModelInput,
     preferred_model: Option<EditPredictionModelKind>,
-    server: EditPredictionServer,
     cx: &mut Context<EditPredictionStore>,
 ) -> Task<Result<Option<EditPredictionResult>>> {
-    let custom_server_settings = match server {
-        EditPredictionServer::Cloud => None,
-        EditPredictionServer::Ollama | EditPredictionServer::CustomOpenAi => {
-            let settings = &all_language_settings(None, cx).edit_predictions;
-            match server {
-                EditPredictionServer::Ollama => settings.ollama.clone(),
-                EditPredictionServer::CustomOpenAi => settings.open_ai_compatible_api.clone(),
-                EditPredictionServer::Cloud => unreachable!(),
-            }
+    let settings = &all_language_settings(None, cx).edit_predictions;
+    let provider = settings.provider;
+    let custom_server_settings = match provider {
+        settings::EditPredictionProvider::Ollama => settings.ollama.clone(),
+        settings::EditPredictionProvider::OpenAiCompatibleApi => {
+            settings.open_ai_compatible_api.clone()
         }
+        _ => None,
     };
 
     let http_client = cx.http_client();
@@ -146,10 +142,11 @@ pub fn request_prediction_with_zeta(
                     let max_tokens = custom_settings.max_output_tokens * 4;
 
                     if is_zeta1 {
+                        let ranges = excerpt_ranges;
                         let prompt = zeta1::format_zeta1_from_input(
                             &prompt_input,
-                            excerpt_ranges.editable_350.clone(),
-                            excerpt_ranges.editable_350_context_150.clone(),
+                            ranges.editable_350.clone(),
+                            ranges.editable_350_context_150.clone(),
                         );
                         let stop_tokens = vec![
                             EDITABLE_REGION_END_MARKER.to_string(),
@@ -159,7 +156,7 @@ pub fn request_prediction_with_zeta(
                         ];
 
                         let (response_text, request_id) = send_custom_server_request(
-                            server,
+                            provider,
                             custom_settings,
                             prompt,
                             max_tokens,
@@ -178,7 +175,7 @@ pub fn request_prediction_with_zeta(
                         let prompt = format!("{prompt}{prefill}");
 
                         let (response_text, request_id) = send_custom_server_request(
-                            server,
+                            provider,
                             custom_settings,
                             prompt,
                             max_tokens,
@@ -409,21 +406,21 @@ pub fn zeta2_prompt_input(
 }
 
 pub(crate) async fn send_custom_server_request(
-    server: EditPredictionServer,
+    provider: settings::EditPredictionProvider,
     settings: &OpenAiCompatibleEditPredictionSettings,
     prompt: String,
     max_tokens: u32,
     stop_tokens: Vec<String>,
     http_client: &Arc<dyn http_client::HttpClient>,
 ) -> Result<(String, String)> {
-    match server {
-        EditPredictionServer::Ollama => {
+    match provider {
+        settings::EditPredictionProvider::Ollama => {
             let response =
                 ollama::make_request(settings.clone(), prompt, stop_tokens, http_client.clone())
                     .await?;
             Ok((response.response, response.created_at))
         }
-        EditPredictionServer::CustomOpenAi => {
+        _ => {
             let request = RawCompletionRequest {
                 model: settings.model.clone(),
                 prompt,
@@ -465,7 +462,6 @@ pub(crate) async fn send_custom_server_request(
                 .unwrap_or_default();
             Ok((text, parsed.id))
         }
-        EditPredictionServer::Cloud => unreachable!(),
     }
 }
 

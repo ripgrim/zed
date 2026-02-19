@@ -2023,9 +2023,7 @@ async fn make_test_ep_store(
 
     let ep_store = cx.new(|cx| {
         let mut ep_store = EditPredictionStore::new(client, project.read(cx).user_store(), cx);
-        ep_store.set_edit_prediction_model(EditPredictionModel::Zeta1 {
-            server: EditPredictionServer::Cloud,
-        });
+        ep_store.set_edit_prediction_model(EditPredictionModel::Zeta1);
 
         let worktrees = project.read(cx).worktrees(cx).collect::<Vec<_>>();
         for worktree in worktrees {
@@ -2124,9 +2122,7 @@ async fn test_unauthenticated_without_custom_url_blocks_prediction_impl(cx: &mut
     cx.background_executor.run_until_parked();
 
     let completion_task = ep_store.update(cx, |ep_store, cx| {
-        ep_store.set_edit_prediction_model(EditPredictionModel::Zeta1 {
-            server: EditPredictionServer::Cloud,
-        });
+        ep_store.set_edit_prediction_model(EditPredictionModel::Zeta1);
         ep_store.request_prediction(&project, &buffer, cursor, Default::default(), cx)
     });
 

@@ -2,9 +2,7 @@ use client::{Client, UserStore};
 use codestral::{CodestralEditPredictionDelegate, load_codestral_api_key};
 use collections::HashMap;
 use copilot::CopilotEditPredictionDelegate;
-use edit_prediction::{
-    EditPredictionModel, EditPredictionServer, ZedEditPredictionDelegate, Zeta2FeatureFlag,
-};
+use edit_prediction::{EditPredictionModel, ZedEditPredictionDelegate, Zeta2FeatureFlag};
 use editor::Editor;
 use feature_flags::FeatureFlagAppExt;
 use gpui::{AnyWindowHandle, App, AppContext as _, Context, Entity, WeakEntity};
@@ -115,24 +113,19 @@ fn edit_prediction_provider_config_for_settings(cx: &App) -> Option<EditPredicti
         EditPredictionProvider::Copilot => Some(EditPredictionProviderConfig::Copilot),
         EditPredictionProvider::Supermaven => Some(EditPredictionProviderConfig::Supermaven),
         EditPredictionProvider::Zed => Some(EditPredictionProviderConfig::Zed(
-            EditPredictionModel::Zeta1 {
-                server: EditPredictionServer::Cloud,
-            },
+            EditPredictionModel::Zeta1,
         )),
         EditPredictionProvider::Codestral => Some(EditPredictionProviderConfig::Codestral),
         EditPredictionProvider::Ollama | EditPredictionProvider::OpenAiCompatibleApi => {
-            let (settings, server) = if provider == EditPredictionProvider::Ollama {
-                (settings.ollama.as_ref()?, EditPredictionServer::Ollama)
+            let custom_settings = if provider == EditPredictionProvider::Ollama {
+                settings.ollama.as_ref()?
             } else {
-                (
-                    settings.open_ai_compatible_api.as_ref()?,
-                    EditPredictionServer::CustomOpenAi,
-                )
+                settings.open_ai_compatible_api.as_ref()?
             };
 
-            let mut format = settings.prompt_format;
+            let mut format = custom_settings.prompt_format;
             if format == EditPredictionPromptFormat::Infer {
-                if let Some(inferred_format) = infer_prompt_format(&settings.model) {
+                if let Some(inferred_format) = infer_prompt_format(&custom_settings.model) {
                     format = inferred_format;
                 } else {
                     // todo: notify user that prompt format inference failed
@@ -142,11 +135,11 @@ fn edit_prediction_provider_config_for_settings(cx: &App) -> Option<EditPredicti
 
             if format == EditPredictionPromptFormat::Zeta {
                 Some(EditPredictionProviderConfig::Zed(
-                    EditPredictionModel::Zeta1 { server },
+                    EditPredictionModel::Zeta1,
                 ))
             } else {
                 Some(EditPredictionProviderConfig::Zed(
-                    EditPredictionModel::Fim { server, format },
+                    EditPredictionModel::Fim { format },
                 ))
             }
         }
@@ -161,9 +154,7 @@ fn edit_prediction_provider_config_for_settings(cx: &App) -> Option<EditPredicti
                 && cx.has_flag::<Zeta2FeatureFlag>()
             {
                 Some(EditPredictionProviderConfig::Zed(
-                    EditPredictionModel::Zeta2 {
-                        server: EditPredictionServer::Cloud,
-                    },
+                    EditPredictionModel::Zeta2,
                 ))
             } else {
                 None
@@ -204,8 +195,8 @@ impl EditPredictionProviderConfig {
             EditPredictionProviderConfig::Supermaven => "Supermaven",
             EditPredictionProviderConfig::Codestral => "Codestral",
             EditPredictionProviderConfig::Zed(model) => match model {
-                EditPredictionModel::Zeta1 { .. } => "Zeta1",
-                EditPredictionModel::Zeta2 { .. } => "Zeta2",
+                EditPredictionModel::Zeta1 => "Zeta1",
+                EditPredictionModel::Zeta2 => "Zeta2",
                 EditPredictionModel::Fim { .. } => "FIM",
                 EditPredictionModel::Sweep => "Sweep",
                 EditPredictionModel::Mercury => "Mercury",

@@ -11,7 +11,7 @@ use crate::{
     retrieve_context::run_context_retrieval,
 };
 use anyhow::Context as _;
-use edit_prediction::{DebugEvent, EditPredictionServer, EditPredictionStore, Zeta2RawConfig};
+use edit_prediction::{DebugEvent, EditPredictionStore, Zeta2RawConfig};
 use futures::{FutureExt as _, StreamExt as _, future::Shared};
 use gpui::{AppContext as _, AsyncApp, Task};
 use std::{
@@ -110,12 +110,8 @@ pub async fn run_prediction(
 
     ep_store.update(&mut cx, |store, _cx| {
         let model = match provider {
-            PredictionProvider::Zeta1 => edit_prediction::EditPredictionModel::Zeta1 {
-                server: EditPredictionServer::Cloud,
-            },
-            PredictionProvider::Zeta2(_) => edit_prediction::EditPredictionModel::Zeta2 {
-                server: EditPredictionServer::Cloud,
-            },
+            PredictionProvider::Zeta1 => edit_prediction::EditPredictionModel::Zeta1,
+            PredictionProvider::Zeta2(_) => edit_prediction::EditPredictionModel::Zeta2,
             PredictionProvider::Sweep => edit_prediction::EditPredictionModel::Sweep,
             PredictionProvider::Mercury => edit_prediction::EditPredictionModel::Mercury,
             PredictionProvider::Teacher(..)

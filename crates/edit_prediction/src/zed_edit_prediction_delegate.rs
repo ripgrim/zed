@@ -62,7 +62,7 @@ impl EditPredictionDelegate for ZedEditPredictionDelegate {
     }
 
     fn icons(&self, cx: &App) -> EditPredictionIconSet {
-        self.store.read(cx).icons()
+        self.store.read(cx).icons(cx)
     }
 
     fn data_collection_state(&self, cx: &App) -> DataCollectionState {

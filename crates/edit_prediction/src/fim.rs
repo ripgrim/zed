@@ -1,6 +1,6 @@
 use crate::{
-    EditPredictionId, EditPredictionModelInput, EditPredictionServer, cursor_excerpt,
-    prediction::EditPredictionResult, zeta,
+    EditPredictionId, EditPredictionModelInput, cursor_excerpt, prediction::EditPredictionResult,
+    zeta,
 };
 use anyhow::{Context as _, Result, anyhow};
 use gpui::{App, AppContext as _, Entity, Task};
@@ -33,10 +33,10 @@ pub fn request_prediction(
         ..
     }: EditPredictionModelInput,
     prompt_format: EditPredictionPromptFormat,
-    server: EditPredictionServer,
     cx: &mut App,
 ) -> Task<Result<Option<EditPredictionResult>>> {
     let settings = &all_language_settings(None, cx).edit_predictions;
+    let provider = settings.provider;
 
     let full_path: Arc<Path> = snapshot
         .file()
@@ -48,12 +48,14 @@ pub fn request_prediction(
     let cursor_point = position.to_point(&snapshot);
     let buffer_snapshotted_at = Instant::now();
 
-    let Some(settings) = (match server {
-        EditPredictionServer::Ollama => settings.ollama.clone(),
-        EditPredictionServer::CustomOpenAi => settings.open_ai_compatible_api.clone(),
-        EditPredictionServer::Cloud => None,
+    let Some(settings) = (match provider {
+        settings::EditPredictionProvider::Ollama => settings.ollama.clone(),
+        settings::EditPredictionProvider::OpenAiCompatibleApi => {
+            settings.open_ai_compatible_api.clone()
+        }
+        _ => None,
     }) else {
-        return Task::ready(Err(anyhow!("Unsupported edit prediction server for FIM")));
+        return Task::ready(Err(anyhow!("Unsupported edit prediction provider for FIM")));
     };
 
     let result = cx.background_spawn(async move {
@@ -91,7 +93,7 @@ pub fn request_prediction(
 
         let max_tokens = settings.max_output_tokens;
         let (response_text, request_id) = zeta::send_custom_server_request(
-            server,
+            provider,
             &settings,
             prompt,
             max_tokens,

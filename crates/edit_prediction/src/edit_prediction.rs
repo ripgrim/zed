@@ -147,25 +147,11 @@ pub struct EditPredictionStore {
 
 #[derive(Copy, Clone, PartialEq, Eq)]
 pub enum EditPredictionModel {
-    Zeta1 {
-        server: EditPredictionServer,
-    },
-    Zeta2 {
-        server: EditPredictionServer,
-    },
-    Fim {
-        format: EditPredictionPromptFormat,
-        server: EditPredictionServer,
-    },
+    Zeta1,
+    Zeta2,
+    Fim { format: EditPredictionPromptFormat },
     Sweep,
     Mercury,
-}
-
-#[derive(Copy, Clone, PartialEq, Eq)]
-pub enum EditPredictionServer {
-    Cloud,
-    CustomOpenAi,
-    Ollama,
 }
 
 #[derive(Clone)]
@@ -697,9 +683,7 @@ impl EditPredictionStore {
                 },
             ),
             update_required: false,
-            edit_prediction_model: EditPredictionModel::Zeta2 {
-                server: EditPredictionServer::Cloud,
-            },
+            edit_prediction_model: EditPredictionModel::Zeta2,
             zeta2_raw_config: Self::zeta2_raw_config_from_env(),
             sweep_ai: SweepAi::new(cx),
             mercury: Mercury::new(cx),
@@ -732,7 +716,7 @@ impl EditPredictionStore {
         self.zeta2_raw_config.as_ref()
     }
 
-    pub fn icons(&self) -> edit_prediction_types::EditPredictionIconSet {
+    pub fn icons(&self, cx: &App) -> edit_prediction_types::EditPredictionIconSet {
         use ui::IconName;
         match self.edit_prediction_model {
             EditPredictionModel::Sweep => {
@@ -745,14 +729,7 @@ impl EditPredictionStore {
             EditPredictionModel::Mercury => {
                 edit_prediction_types::EditPredictionIconSet::new(IconName::Inception)
             }
-            EditPredictionModel::Zeta1 { server }
-            | EditPredictionModel::Zeta2 { server }
-            | EditPredictionModel::Fim { server, .. }
-                if server == EditPredictionServer::Ollama =>
-            {
-                edit_prediction_types::EditPredictionIconSet::new(IconName::AiOllama)
-            }
-            EditPredictionModel::Zeta1 { .. } | EditPredictionModel::Zeta2 { .. } => {
+            EditPredictionModel::Zeta1 | EditPredictionModel::Zeta2 => {
                 edit_prediction_types::EditPredictionIconSet::new(IconName::ZedPredict)
                     .with_disabled(IconName::ZedPredictDisabled)
                     .with_up(IconName::ZedPredictUp)
@@ -760,7 +737,15 @@ impl EditPredictionStore {
                     .with_error(IconName::ZedPredictError)
             }
             EditPredictionModel::Fim { .. } => {
-                edit_prediction_types::EditPredictionIconSet::new(IconName::AiOpenAiCompat)
+                let settings = &all_language_settings(None, cx).edit_predictions;
+                match settings.provider {
+                    EditPredictionProvider::Ollama => {
+                        edit_prediction_types::EditPredictionIconSet::new(IconName::AiOllama)
+                    }
+                    _ => {
+                        edit_prediction_types::EditPredictionIconSet::new(IconName::AiOpenAiCompat)
+                    }
+                }
             }
         }
     }
@@ -875,7 +860,7 @@ impl EditPredictionStore {
     pub fn usage(&self, cx: &App) -> Option<EditPredictionUsage> {
         if matches!(
             self.edit_prediction_model,
-            EditPredictionModel::Zeta2 { .. } | EditPredictionModel::Zeta1 { .. }
+            EditPredictionModel::Zeta2 | EditPredictionModel::Zeta1
         ) {
             self.user_store.read(cx).edit_prediction_usage()
         } else {
@@ -1310,8 +1295,12 @@ impl EditPredictionStore {
                     cx,
                 );
             }
-            EditPredictionModel::Zeta1 { server } | EditPredictionModel::Zeta2 { server } => {
-                if server == EditPredictionServer::Cloud {
+            EditPredictionModel::Zeta1 | EditPredictionModel::Zeta2 => {
+                let is_cloud = !matches!(
+                    all_language_settings(None, cx).edit_predictions.provider,
+                    EditPredictionProvider::Ollama | EditPredictionProvider::OpenAiCompatibleApi
+                );
+                if is_cloud {
                     zeta::edit_prediction_accepted(self, current_prediction, cx)
                 }
             }
@@ -1449,8 +1438,12 @@ impl EditPredictionStore {
         cx: &App,
     ) {
         match self.edit_prediction_model {
-            EditPredictionModel::Zeta1 { server } | EditPredictionModel::Zeta2 { server } => {
-                if server == EditPredictionServer::Cloud {
+            EditPredictionModel::Zeta1 | EditPredictionModel::Zeta2 => {
+                let is_cloud = !matches!(
+                    all_language_settings(None, cx).edit_predictions.provider,
+                    EditPredictionProvider::Ollama | EditPredictionProvider::OpenAiCompatibleApi
+                );
+                if is_cloud {
                     self.reject_predictions_tx
                         .unbounded_send(EditPredictionRejection {
                             request_id: prediction_id.to_string(),
@@ -1650,12 +1643,8 @@ impl EditPredictionStore {
             -> Task<Result<Option<(EditPredictionResult, PredictionRequestedBy)>>>
         + 'static,
     ) {
-        let is_ollama = match self.edit_prediction_model {
-            EditPredictionModel::Zeta1 { server }
-            | EditPredictionModel::Zeta2 { server }
-            | EditPredictionModel::Fim { server, .. } => server == EditPredictionServer::Ollama,
-            _ => false,
-        };
+        let is_ollama = all_language_settings(None, cx).edit_predictions.provider
+            == EditPredictionProvider::Ollama;
         let drop_on_cancel = is_ollama;
         let max_pending_predictions = if is_ollama { 1 } else { 2 };
         let project_state = self.get_or_init_project(&project, cx);
@@ -1874,23 +1863,19 @@ impl EditPredictionStore {
         };
 
         let task = match self.edit_prediction_model {
-            EditPredictionModel::Zeta1 { server } => zeta::request_prediction_with_zeta(
+            EditPredictionModel::Zeta1 => zeta::request_prediction_with_zeta(
                 self,
                 inputs,
                 Some(zeta_prompt::EditPredictionModelKind::Zeta1),
-                server,
                 cx,
             ),
-            EditPredictionModel::Zeta2 { server } => zeta::request_prediction_with_zeta(
+            EditPredictionModel::Zeta2 => zeta::request_prediction_with_zeta(
                 self,
                 inputs,
                 Some(zeta_prompt::EditPredictionModelKind::Zeta2),
-                server,
                 cx,
             ),
-            EditPredictionModel::Fim { format, server } => {
-                fim::request_prediction(inputs, format, server, cx)
-            }
+            EditPredictionModel::Fim { format } => fim::request_prediction(inputs, format, cx),
             EditPredictionModel::Sweep => self.sweep_ai.request_prediction_with_sweep(inputs, cx),
             EditPredictionModel::Mercury => self.mercury.request_prediction(inputs, cx),
         };
