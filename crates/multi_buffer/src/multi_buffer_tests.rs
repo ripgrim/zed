@@ -5124,3 +5124,45 @@ fn test_cannot_seek_backward_after_excerpt_replacement(cx: &mut TestAppContext) 
         snapshot.summaries_for_anchors::<Point, _>(&[anchor_in_e_b2, anchor_in_e_b3]);
     });
 }
+
+#[gpui::test]
+fn test_to_offset_clamps_stale_offset(cx: &mut App) {
+    let buffer = cx.new(|cx| Buffer::local("hello world", cx));
+    let multibuffer = cx.new(|cx| MultiBuffer::singleton(buffer.clone(), cx));
+
+    let stale_offset = multibuffer.read(cx).snapshot(cx).len();
+    assert_eq!(stale_offset, MultiBufferOffset(11));
+
+    buffer.update(cx, |buffer, cx| {
+        buffer.edit([(5..11, "")], None, cx);
+    });
+
+    multibuffer.update(cx, |multibuffer, cx| {
+        let snapshot = multibuffer.snapshot(cx);
+        assert_eq!(snapshot.len(), MultiBufferOffset(5));
+
+        let clamped = stale_offset.to_offset(&snapshot);
+        assert_eq!(clamped, MultiBufferOffset(5));
+    });
+}
+
+#[gpui::test]
+fn test_edit_with_stale_offset_after_buffer_shrinks(cx: &mut App) {
+    let buffer = cx.new(|cx| Buffer::local("hello world", cx));
+    let multibuffer = cx.new(|cx| MultiBuffer::singleton(buffer.clone(), cx));
+
+    let stale_end = multibuffer.read(cx).snapshot(cx).len();
+    assert_eq!(stale_end, MultiBufferOffset(11));
+
+    buffer.update(cx, |buffer, cx| {
+        buffer.edit([(5..11, "")], None, cx);
+    });
+
+    multibuffer.update(cx, |multibuffer, cx| {
+        let edits = vec![(stale_end..stale_end, "!")];
+        multibuffer.edit(edits, None, cx);
+    });
+
+    let final_text = multibuffer.read(cx).snapshot(cx).text();
+    assert_eq!(final_text, "hello!");
+}
